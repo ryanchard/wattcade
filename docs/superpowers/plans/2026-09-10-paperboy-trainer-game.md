@@ -4559,9 +4559,22 @@ describe('createWorld', () => {
   });
 
   it('is reproducible from its seed', () => {
+    // ensureBlocks MUST be called first: createWorld alone leaves houses
+    // empty, and comparing [] with [] passes for any pair of seeds.
     const a = createWorld(42);
     const b = createWorld(42);
+    ensureBlocks(a);
+    ensureBlocks(b);
     expect(a.houses.map((h) => h.spec.id)).toEqual(b.houses.map((h) => h.spec.id));
+  });
+
+  it('produces a different street for a different seed', () => {
+    const a = createWorld(42);
+    const b = createWorld(999_999);
+    ensureBlocks(a);
+    ensureBlocks(b);
+    expect(a.hazards.map((h) => h.spec.id))
+      .not.toEqual(b.hazards.map((h) => h.spec.id));
   });
 });
 
@@ -4887,6 +4900,20 @@ export function advanceRider(
   w.elapsed += dt;
 }
 
+/** Lowest lateral a weaving hazard may reach: the edge of the house
+ *  footprint. Without this a lawnmower swings to 0.88 and a dog to 1.46,
+ *  rendering them inside a building. */
+const WEAVE_MIN_LATERAL = 1.5;
+
+/**
+ * Advance hazard motion.
+ *
+ * The weave is a function of ABSOLUTE `w.elapsed` (advanced by
+ * `advanceRider`), not of `dt` — so callers must advance the rider before
+ * moving hazards each frame. That is deliberate: an absolute-time phase
+ * makes this idempotent within a frame, so calling it twice cannot
+ * double-move anything.
+ */
 export function moveHazards(w: WorldState, dt: number): void {
   for (const h of w.hazards) {
     if (!h.spec.moving) continue;
@@ -4898,7 +4925,10 @@ export function moveHazards(w: WorldState, dt: number): void {
       // Everything else weaves across its own band.
       const t = w.elapsed + h.spec.phase * 10;
       const swing = Math.sin(t * 0.8) * 0.8;
-      h.lateral = h.spec.lateral + swing;
+      h.lateral = Math.max(
+        WEAVE_MIN_LATERAL,
+        Math.min(RIDABLE_MAX, h.spec.lateral + swing),
+      );
       h.distance = h.spec.distance + Math.sin(t * 0.4) * 2;
     }
   }
