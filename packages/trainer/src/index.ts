@@ -7,5 +7,6 @@ export * from './ftms/controlPointWriter.js';
 export * from './sources/gattLink.js';
 export * from './sources/ftmsSource.js';
 export * from './sources/keyboardSource.js';
+export * from './sources/replaySource.js';
 
 export const PACKAGE_NAME = '@paperboy/trainer';
