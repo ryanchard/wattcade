@@ -153,4 +153,32 @@ describe('FtmsSource', () => {
     f.emit();                          // good frame still lands
     expect(samples).toHaveLength(1);
   });
+
+  it('does not connect twice when start() is called twice in a row', async () => {
+    const f = fakeLink();
+    let calls = 0;
+    const src = new FtmsSource(async () => {
+      calls += 1;
+      return f.link;
+    });
+
+    await Promise.all([src.start(), src.start()]);
+
+    expect(calls).toBe(1);
+  });
+
+  it('connects again after stop() following a previous start()', async () => {
+    const f = fakeLink();
+    let calls = 0;
+    const src = new FtmsSource(async () => {
+      calls += 1;
+      return f.link;
+    });
+
+    await src.start();
+    await src.stop();
+    await src.start();
+
+    expect(calls).toBe(2);
+  });
 });

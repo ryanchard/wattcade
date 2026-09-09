@@ -17,6 +17,12 @@ export class FtmsSource implements TrainerSource {
   #writer: ControlPointWriter | null = null;
   #teardown: Unsubscribe[] = [];
   #canControl = false;
+  // Set synchronously at the top of start() and cleared as soon as the
+  // in-flight #connect() call settles. start() awaits #connect(), so a
+  // plain `#link !== null` check is not enough to stop a second concurrent
+  // start() call — both calls could pass that check before either has
+  // assigned #link. This flag closes that window.
+  #connecting = false;
 
   #sampleListeners = new Set<(s: TrainerSample) => void>();
   #statusListeners = new Set<(s: TrainerStatus) => void>();
@@ -30,14 +36,24 @@ export class FtmsSource implements TrainerSource {
   }
 
   async start(): Promise<void> {
+    // Re-entrancy guard: a connection attempt already in flight, or a link
+    // already established, means this call has nothing to do. Checking
+    // #link alone would not be enough — two rapid calls can both observe
+    // #link === null before either has awaited #connect() far enough to
+    // assign it — so #connecting is set synchronously, before any await.
+    if (this.#connecting || this.#link !== null) return;
+    this.#connecting = true;
+
     this.#emitStatus('connecting', null, null);
     let link: GattLink;
     try {
       link = await this.#connect();
     } catch (err) {
+      this.#connecting = false;
       this.#emitStatus('error', null, describeError(err));
       return;
     }
+    this.#connecting = false;
 
     this.#link = link;
     this.#teardown.push(link.onDisconnect(() => this.#handleDisconnect()));
@@ -67,11 +83,29 @@ export class FtmsSource implements TrainerSource {
   }
 
   async stop(): Promise<void> {
+    // Nothing was ever established (or a connect attempt already failed
+    // before assigning anything) — stopping is a no-op. In particular, do
+    // not emit a 'disconnected' status a status-driven UI would read as a
+    // disconnect that never happened.
+    if (
+      this.#link === null &&
+      this.#writer === null &&
+      this.#teardown.length === 0
+    ) {
+      return;
+    }
+
     if (this.#writer !== null) {
       await this.#writer.resetResistance();
       this.#writer.dispose();
       this.#writer = null;
     }
+    // Unsubscribe (including from onDisconnect) BEFORE calling
+    // link.disconnect() below. link.disconnect() itself fires the
+    // gattserverdisconnected event on a real device; if the onDisconnect
+    // listener were still attached, that would re-enter #handleDisconnect
+    // and emit a second, spurious 'disconnected' status. Do not reorder
+    // these two steps.
     this.#teardown.forEach((fn) => fn());
     this.#teardown = [];
     this.#canControl = false;
