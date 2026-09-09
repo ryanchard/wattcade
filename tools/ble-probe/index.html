@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>KICKR probe</title>
+    <style>
+      body { font: 14px ui-monospace, monospace; margin: 2rem; max-width: 60rem; }
+      button { font: inherit; padding: .5rem 1rem; margin-right: .5rem; }
+      #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 1rem;
+             height: 24rem; overflow: auto; margin-top: 1rem; }
+      .live { display: flex; gap: 2rem; margin-top: 1rem; font-size: 1.5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>KICKR probe</h1>
+    <p>Close Zwift and the Wahoo app first — a trainer pairs to one client at a time.</p>
+    <button id="connect">Connect</button>
+    <button id="sweep" disabled>Run grade sweep</button>
+    <button id="download" disabled>Download capture</button>
+    <div class="live">
+      <div>Power <b id="power">—</b> W</div>
+      <div>Cadence <b id="cadence">—</b> rpm</div>
+      <div>Speed <b id="speed">—</b> km/h</div>
+    </div>
+    <div id="log"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
