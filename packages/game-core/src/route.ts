@@ -1,5 +1,5 @@
 import { BLOCK_LENGTH_M, difficultyAt } from './difficulty.js';
-import { mulberry32, pick, rangeFloat, rangeInt } from './rng.js';
+import { mulberry32, pick, rangeFloat } from './rng.js';
 import type { Rng } from './rng.js';
 
 export type HazardKind =
@@ -80,6 +80,28 @@ const TEMPLATES: readonly HazardTemplate[] = [
  * Lateral intervals within the ridable band that no hazard occupies at this
  * point along the street. The generator uses this to guarantee that a block
  * can always be ridden through; the tests use it to prove that it did.
+ *
+ * SCOPE OF THE GUARANTEE: this function, and the `wouldBlock` check the
+ * generator runs against it, evaluate every hazard at its spawn `distance`
+ * and `lateral` only. They never read `speed`, `phase`, or `moving`. So the
+ * invariant `generateBlock` actually establishes is "no block is impassable
+ * in its static spawn configuration" — NOT "no block is ever impassable at
+ * runtime". A later system that animates cars, dogs, etc. moves hazards away
+ * from these spawn coordinates over time, and that motion is not analysed
+ * here at all.
+ *
+ * This is fine for a *moving* hazard: it can transiently narrow or even
+ * momentarily close a corridor as it passes through, but because it keeps
+ * moving it also reopens one — a rider who waits or times their line still
+ * gets through. That is categorically different from a static wall, which
+ * is what this invariant actually forbids.
+ *
+ * The failure mode to watch for: any future code that freezes a moving
+ * hazard in place, slows it enough that it behaves like a static obstacle
+ * for practical purposes, or otherwise removes its ability to clear the
+ * corridor over time, MUST NOT assume this file's passability guarantee
+ * still holds — it was never evaluated against that hazard's motion, only
+ * against its spawn point.
  */
 export function freeCorridors(
   hazards: readonly HazardSpec[],
