@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardSource } from '../src/sources/keyboardSource.js';
 import type { TrainerSample } from '../src/types.js';
