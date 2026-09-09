@@ -1,0 +1,11 @@
+export const FITNESS_MACHINE_SERVICE = 0x1826;
+export const CYCLING_POWER_SERVICE = 0x1818;
+export const CYCLING_SPEED_CADENCE_SERVICE = 0x1816;
+export const HEART_RATE_SERVICE = 0x180d;
+export const DEVICE_INFORMATION_SERVICE = 0x180a;
+export const BATTERY_SERVICE = 0x180f;
+
+export const INDOOR_BIKE_DATA = 0x2ad2;
+export const FITNESS_MACHINE_CONTROL_POINT = 0x2ad9;
+export const FITNESS_MACHINE_FEATURE = 0x2acc;
+export const FITNESS_MACHINE_STATUS = 0x2ada;
