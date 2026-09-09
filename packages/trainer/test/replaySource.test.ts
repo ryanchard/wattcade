@@ -106,6 +106,50 @@ describe('parseCapture', () => {
     expect(() => parseCapture({ version: 1, device: 'x', recordedAt: 'y' }))
       .toThrow(/frames/i);
   });
+
+  it('rejects a frame with odd-length hex, naming the frame index', () => {
+    expect(() =>
+      parseCapture({
+        ...twoFrames,
+        frames: [{ t: 1000, hex: FRAME_HEX }, { t: 1500, hex: 'abc' }],
+      }),
+    ).toThrow(/frame 1\b.*(odd|hex)/i);
+  });
+
+  it('rejects a frame with non-hex characters, naming the frame index', () => {
+    expect(() =>
+      parseCapture({
+        ...twoFrames,
+        frames: [{ t: 1000, hex: 'zzzzzzzzzzzzzzzz' }],
+      }),
+    ).toThrow(/frame 0\b.*hex/i);
+  });
+
+  it('rejects a frame missing hex entirely, naming the frame index', () => {
+    expect(() =>
+      parseCapture({
+        ...twoFrames,
+        frames: [{ t: 1000, hex: FRAME_HEX }, { t: 1500 }],
+      }),
+    ).toThrow(/frame 1\b.*hex/i);
+  });
+
+  it('rejects a frame with a non-numeric t, naming the frame index', () => {
+    expect(() =>
+      parseCapture({
+        ...twoFrames,
+        frames: [{ t: '1000', hex: FRAME_HEX }],
+      }),
+    ).toThrow(/frame 0\b.*t\b/i);
+  });
+
+  it('still accepts the existing valid fixtures', () => {
+    expect(parseCapture(twoFrames).frames).toHaveLength(2);
+    const cap = parseCapture(
+      JSON.parse(readFileSync(fixture('sample-capture.json'), 'utf8')),
+    );
+    expect(cap.frames).toHaveLength(120);
+  });
 });
 
 describe('synthetic capture', () => {

@@ -24,6 +24,30 @@ export interface ReplaySourceOptions {
   rate?: number;
 }
 
+const HEX_RE = /^[0-9a-fA-F]*$/;
+
+function validateFrame(raw: unknown, index: number): CaptureFrame {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error(`Capture frame ${index} must be an object.`);
+  }
+  const f = raw as Partial<CaptureFrame>;
+  if (typeof f.t !== 'number' || !Number.isFinite(f.t)) {
+    throw new Error(`Capture frame ${index} has a non-numeric "t".`);
+  }
+  if (typeof f.hex !== 'string') {
+    throw new Error(`Capture frame ${index} is missing a string "hex".`);
+  }
+  if (f.hex.length % 2 !== 0) {
+    throw new Error(
+      `Capture frame ${index} has an odd-length "hex" (${f.hex.length} chars).`,
+    );
+  }
+  if (!HEX_RE.test(f.hex)) {
+    throw new Error(`Capture frame ${index} has non-hex characters in "hex".`);
+  }
+  return { t: f.t, hex: f.hex };
+}
+
 export function parseCapture(json: unknown): Capture {
   if (typeof json !== 'object' || json === null) {
     throw new Error('Capture must be an object.');
@@ -35,11 +59,12 @@ export function parseCapture(json: unknown): Capture {
   if (!Array.isArray(c.frames)) {
     throw new Error('Capture is missing a frames array.');
   }
+  const frames = c.frames.map((f, i) => validateFrame(f, i));
   return {
     version: 1,
     device: typeof c.device === 'string' ? c.device : 'unknown',
     recordedAt: typeof c.recordedAt === 'string' ? c.recordedAt : '',
-    frames: c.frames,
+    frames,
   };
 }
 
@@ -150,6 +175,12 @@ export class ReplaySource implements TrainerSource {
 
     const next = this.#frames[this.#index + 1];
     this.#index += 1;
-    this.#schedule(next === undefined ? 500 : Math.max(0, next.t - frame.t));
+    if (next === undefined) {
+      // Last frame with looping off: nothing more to schedule.
+      if (!this.#loop) return;
+      this.#schedule(500);
+      return;
+    }
+    this.#schedule(Math.max(0, next.t - frame.t));
   }
 }
