@@ -51,8 +51,8 @@ describe('parseIndoorBikeData', () => {
   });
 
   it('skips expended energy fields without losing alignment', () => {
-    // flags 0x0141 = More Data set, power (bit6), expended energy (bit8),
-    // then heart rate would follow. Energy is 5 bytes: u16 + u16 + u8.
+    // flags 0x0341 = More Data (bit 0), Instantaneous Power (bit 6), Expended Energy (bit 8),
+    // Heart Rate (bit 9). Energy is 5 bytes: u16 + u16 + u8.
     const d = parseIndoorBikeData(
       view(0x41, 0x03, 0xfa, 0x00, 0x64, 0x00, 0x32, 0x00, 0x05, 0x48),
     );

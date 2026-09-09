@@ -29,6 +29,12 @@ const Flag = {
 
 const KMH_TO_MS = 1 / 3.6;
 
+/**
+ * Parse a Bluetooth FTMS Indoor Bike Data notification.
+ *
+ * Throws RangeError if the buffer is shorter than the flags field declares.
+ * Callers receiving live radio data must catch this error to avoid killing the connection.
+ */
 export function parseIndoorBikeData(view: DataView): IndoorBikeData {
   const flags = view.getUint16(0, true);
   let offset = 2;
