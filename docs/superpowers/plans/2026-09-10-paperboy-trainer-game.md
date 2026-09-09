@@ -3605,6 +3605,15 @@ const TEMPLATES: readonly HazardTemplate[] = [
  * Lateral intervals within the ridable band that no hazard occupies at this
  * point along the street. The generator uses this to guarantee that a block
  * can always be ridden through; the tests use it to prove that it did.
+ *
+ * SCOPE — read before relying on this. Hazards are evaluated ONLY at their
+ * spawn `distance`/`lateral`. The `speed`, `phase` and `moving` fields are
+ * never read here. So the guarantee is "no block is impassable in its static
+ * spawn configuration", NOT "no block is ever impassable". Once hazards are
+ * animated, a moving one can transiently narrow the corridor — which is
+ * acceptable precisely because motion also reopens it, unlike a static wall.
+ * Any future code that freezes, slows or clusters hazards must not assume
+ * this invariant still covers it.
  */
 export function freeCorridors(
   hazards: readonly HazardSpec[],
