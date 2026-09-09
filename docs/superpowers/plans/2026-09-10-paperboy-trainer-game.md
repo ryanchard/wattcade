@@ -98,7 +98,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
@@ -130,6 +130,21 @@
 ```
 
 Add `@types/web-bluetooth` to root `devDependencies` — Web Bluetooth is not in TypeScript's default DOM lib.
+
+Also write a root `tsconfig.json`, which is what `tsc --noEmit` resolves. It
+must exist and must list every source root, or typechecking silently covers
+nothing:
+
+```json
+{
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/src", "packages/*/test",
+    "apps/*/src", "apps/*/test",
+    "tools/*/src"
+  ]
+}
+```
 
 - [ ] **Step 3: Write the package manifests**
 
@@ -5978,7 +5993,7 @@ The last task of Phase 4. It closes the loop: trainer power drives the world, an
 // session.ts
 export const POWER_TAU_S = 0.25;
 export const FIXED_DT = 1 / 120;
-export const MAX_SUBSTEPS = 5;
+export const MAX_SUBSTEPS = 30;
 export interface Session {
   world: WorldState; profile: RiderProfile;
   powerTarget: number; powerCurrent: number;
@@ -6096,8 +6111,9 @@ describe('advanceFixed', () => {
     setPower(a, 250);
     setPower(b, 250);
 
-    advanceFixed(a, 0.5, still);
-    for (let i = 0; i < 60; i++) advance(b, still, FIXED_DT);
+    // 0.2 s is 24 substeps — inside MAX_SUBSTEPS, so nothing is clamped away.
+    advanceFixed(a, 0.2, still);
+    for (let i = 0; i < 24; i++) advance(b, still, FIXED_DT);
 
     expect(a.world.rider.distance).toBeCloseTo(b.world.rider.distance, 3);
   });
@@ -6196,7 +6212,12 @@ import { stepWorld } from './rules.js';
 
 export const POWER_TAU_S = 0.25;
 export const FIXED_DT = 1 / 120;
-export const MAX_SUBSTEPS = 5;
+/**
+ * main.ts clamps a frame to 0.25 s, which at FIXED_DT needs exactly 30
+ * substeps. A lower cap would silently slow the game down whenever a frame
+ * ran long, rather than only when the tab had genuinely stalled.
+ */
+export const MAX_SUBSTEPS = 30;
 export const MAX_PLAUSIBLE_WATTS = 2000;
 
 export interface Session {
