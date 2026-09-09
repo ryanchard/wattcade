@@ -39,9 +39,19 @@ export function worldToScreen(
 }
 
 /**
- * Painter's-algorithm sort key. Camera-independent on purpose: the camera
- * term is constant within a frame, so this orders identically to screen y
- * while being computable once per entity rather than once per frame.
+ * Painter's-algorithm sort key for ground-plane footprints. Deliberately
+ * excludes height: entities anchor at their ground footprint for occlusion
+ * ordering (the right default—a building farther away draws under a nearer
+ * one, regardless of either's height). Consequence: two entities at the same
+ * ground footprint tie exactly, even if one flies high above the other.
+ * A paper arcing over a house at (distance 100, lateral 4, height 5) and
+ * the house (distance 100, lateral 4, height 0) both yield depthKey = -96;
+ * draw order is array-order only. The renderer must accept this (harmless if
+ * projectiles draw in a later pass, or footprint collisions are rare) or add
+ * height as an explicit tie-break. Camera-independent on purpose: within a
+ * frame the camera term is constant, so this orders identically to screen y
+ * while being computable once per entity. If height is ever added to the key,
+ * it must remain camera-independent or the once-per-entity optimisation is lost.
  */
 export function depthKey(distance: number, lateral: number): number {
   return lateral - distance;
