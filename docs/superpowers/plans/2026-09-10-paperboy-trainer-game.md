@@ -316,8 +316,8 @@ describe('parseIndoorBikeData', () => {
   });
 
   it('skips expended energy fields without losing alignment', () => {
-    // flags 0x0141 = More Data set, power (bit6), expended energy (bit8),
-    // then heart rate would follow. Energy is 5 bytes: u16 + u16 + u8.
+    // flags 0x0341 = More Data (bit0), power (bit6), expended energy (bit8)
+    // and heart rate (bit9). Energy is 5 bytes: u16 + u16 + u8.
     const d = parseIndoorBikeData(
       view(0x41, 0x03, 0xfa, 0x00, 0x64, 0x00, 0x32, 0x00, 0x05, 0x48),
     );
@@ -833,12 +833,16 @@ describe('ControlPointWriter', () => {
     await w.requestControl();
     f.writes.length = 0;
 
-    for (let i = 0; i < 10; i++) w.setSimulation({ ...SIM, grade: i });
+    // Half-percent steps keep every value inside the +/-8 clamp, so the
+    // final one is uniquely identifiable. Whole numbers would not be:
+    // grade 8 and grade 9 both encode to 800 once clamped, and the test
+    // could no longer tell "last value" from "second-to-last".
+    for (let i = 0; i < 10; i++) w.setSimulation({ ...SIM, grade: i * 0.5 });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(f.writes).toHaveLength(1);
-    // The write carries the LAST value, grade 9 -> 900 -> 0x0384
-    expect(Array.from(f.writes[0]!).slice(3, 5)).toEqual([0x84, 0x03]);
+    // The write carries the LAST value, grade 4.5 -> 450 -> 0x01C2
+    expect(Array.from(f.writes[0]!).slice(3, 5)).toEqual([0xc2, 0x01]);
   });
 
   it('rate-limits simulation writes to the configured interval', async () => {
@@ -899,6 +903,18 @@ describe('ControlPointWriter', () => {
     await w.resetResistance();
     expect(f.writes).toHaveLength(1);
     expect(Array.from(f.writes[0]!).slice(3, 5)).toEqual([0x00, 0x00]);
+  });
+
+  it('resolves an in-flight write when disposed mid-flight', async () => {
+    const f = fakeTransport();
+    f.setAutoRespond(false);
+    const w = new ControlPointWriter(f.transport);
+    const pending = w.requestControl();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.writes).toHaveLength(1); // in flight, no indication yet
+
+    w.dispose();
+    await expect(pending).resolves.toBe(false);
   });
 
   it('stops writing after dispose', async () => {
@@ -1014,6 +1030,13 @@ export class ControlPointWriter {
     this.#simTimer = null;
     this.#inFlightTimer = null;
     this.#pendingSim = null;
+    // The in-flight entry must be settled too. Clearing its timer above
+    // cancelled the timeout that would eventually have resolved it, so
+    // leaving it alone deadlocks any caller awaiting a write that was
+    // already on the wire when a disconnect tore the writer down.
+    const inFlight = this.#inFlight;
+    this.#inFlight = null;
+    inFlight?.resolve(false);
     this.#queue.forEach((e) => e.resolve(false));
     this.#queue = [];
     this.#unsubscribe();
@@ -1084,7 +1107,7 @@ export class ControlPointWriter {
 - [ ] **Step 4: Verify**
 
 Run: `npx vitest run packages/trainer/test/controlPointWriter.test.ts`
-Expected: 9 passing.
+Expected: 10 passing.
 
 If the "one write outstanding" test hangs, the cause is `#settle` being reached synchronously from inside `#pump`'s `await transport.write(...)`; the fake transport calls the indication handler before `#inFlight` is observable. The implementation above sets `#inFlight` *before* awaiting the write, which is what makes this correct — do not reorder those lines.
 
@@ -1197,8 +1220,11 @@ describe('stepPhysics', () => {
   });
 
   it('decays to a crawl when power stops', () => {
+    // Coasting from 12 m/s on the flat, rolling resistance alone takes
+    // about 113 s to bring the rider to a stop -- at 60 s they are still
+    // doing nearly 3 m/s. Two minutes is the honest duration here.
     let s: PhysicsState = { speed: 12, distance: 0 };
-    for (let i = 0; i < 60 * 60; i++) {
+    for (let i = 0; i < 60 * 120; i++) {
       s = stepPhysics(s, flat(0), DEFAULT_RIDER, 1 / 60);
     }
     expect(s.speed).toBeLessThan(1);
@@ -1500,13 +1526,22 @@ describe('KeyboardSource', () => {
 Run: `npx vitest run packages/trainer/test/keyboardSource.test.ts`
 Expected: FAIL — module not found.
 
-This test uses `KeyboardEvent`, which needs a DOM. Add to `vitest.config.ts` so the trainer package runs in a DOM environment:
+This test uses `KeyboardEvent`, which Node does not provide. Give the DOM to
+**this file only**, with a pragma as its first line:
 
 ```ts
-environmentMatchGlobs: [['packages/trainer/test/**', 'happy-dom']],
+// @vitest-environment happy-dom
 ```
 
 and add `happy-dom` to root `devDependencies`.
+
+Do **not** reach for `environmentMatchGlobs` over the whole package. Under the
+`node` environment, a module-scope reference to `navigator`, `window` or
+`document` anywhere in `packages/trainer/src` throws `ReferenceError` as soon
+as any test imports it — that is what enforces the project's headless-package
+constraint. Handing a DOM to every test in the package makes such a violation
+resolve silently, and Task 7 is about to add a source that legitimately uses
+`navigator.bluetooth` inside a function. Keep the blast radius to one file.
 
 - [ ] **Step 3: Implement the source**
 
@@ -2114,12 +2149,61 @@ export * from './sources/keyboardSource.js';
 export const PACKAGE_NAME = '@paperboy/trainer';
 ```
 
-- [ ] **Step 6: Verify**
+- [ ] **Step 6: Add the headless-import guard**
+
+The project forbids `navigator`, `window` or `document` at module scope in
+`packages/`, but nothing currently enforces it. Node 21+ ships a built-in
+global `navigator`, so a stray module-scope `navigator` does **not** throw
+under the `node` test environment the way `window` and `document` do — the
+one identifier this package genuinely uses is the one the runtime hides.
+
+Now that `src/index.ts` re-exports every module in the package, one test can
+cover all of them: strip the three globals, import the index, and assert it
+loads. Create `packages/trainer/test/headless.test.ts`:
+
+```ts
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const globals = ['navigator', 'window', 'document'] as const;
+
+describe('the trainer package is headless', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('imports with no browser globals present', async () => {
+    const saved = new Map<string, PropertyDescriptor | undefined>();
+    for (const name of globals) {
+      saved.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+      Reflect.deleteProperty(globalThis, name);
+    }
+    try {
+      vi.resetModules();
+      // Every module in the package is reachable from the index, so a
+      // module-scope browser global anywhere in src/ throws here.
+      await expect(import('../src/index.js')).resolves.toBeDefined();
+    } finally {
+      for (const name of globals) {
+        const d = saved.get(name);
+        if (d !== undefined) Object.defineProperty(globalThis, name, d);
+      }
+    }
+  });
+});
+```
+
+Confirm the guard actually bites: temporarily add `const probe = navigator;`
+at module scope in `src/sources/gattLink.ts`, run this test, and check it
+fails with a `ReferenceError`. Remove the probe and confirm it passes. Do not
+commit the probe.
+
+- [ ] **Step 7: Verify**
 
 Run: `npx vitest run packages/trainer && npm run typecheck`
 Expected: all trainer tests passing, no type errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/trainer
@@ -2235,7 +2319,16 @@ $('connect').addEventListener('click', async () => {
     link.onIndoorBikeData((view) => {
       const raw = hex(view);
       frames.push({ t: Date.now(), hex: raw });
-      const d = parseIndoorBikeData(view);
+      // parseIndoorBikeData throws on a buffer shorter than its flags
+      // declare. In a diagnostic tool a truncated frame is a FINDING, so
+      // log it loudly and keep the raw bytes rather than dying.
+      let d;
+      try {
+        d = parseIndoorBikeData(view);
+      } catch (err) {
+        log(`!! undecodable frame ${raw} — ${String(err)}`);
+        return;
+      }
       $('power').textContent = d.instantaneousPower?.toString() ?? '—';
       $('cadence').textContent = d.instantaneousCadence?.toString() ?? '—';
       $('speed').textContent =
