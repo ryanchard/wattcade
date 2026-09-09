@@ -2697,11 +2697,39 @@ export function parseCapture(json: unknown): Capture {
   if (!Array.isArray(c.frames)) {
     throw new Error('Capture is missing a frames array.');
   }
+
+  // Validate every frame up front. A capture reaches us by a human copying a
+  // file out of their Downloads folder, and a silently corrupted hex string
+  // decodes to plausible-but-wrong power and speed rather than failing --
+  // which would masquerade as a parser/firmware disagreement in the
+  // conformance test that exists to detect exactly that.
+  const frames: CaptureFrame[] = c.frames.map((frame, i) => {
+    if (typeof frame !== 'object' || frame === null) {
+      throw new Error(`Capture frame ${i} is not an object.`);
+    }
+    const f = frame as Partial<CaptureFrame>;
+    if (typeof f.t !== 'number' || !Number.isFinite(f.t)) {
+      throw new Error(`Capture frame ${i} has a non-numeric timestamp.`);
+    }
+    if (typeof f.hex !== 'string') {
+      throw new Error(`Capture frame ${i} is missing its hex payload.`);
+    }
+    if (f.hex.length % 2 !== 0) {
+      throw new Error(
+        `Capture frame ${i} has an odd-length hex payload (${f.hex.length} chars).`,
+      );
+    }
+    if (!/^[0-9a-fA-F]*$/.test(f.hex)) {
+      throw new Error(`Capture frame ${i} has a non-hex character in its payload.`);
+    }
+    return { t: f.t, hex: f.hex };
+  });
+
   return {
     version: 1,
     device: typeof c.device === 'string' ? c.device : 'unknown',
     recordedAt: typeof c.recordedAt === 'string' ? c.recordedAt : '',
-    frames: c.frames,
+    frames,
   };
 }
 
@@ -2804,7 +2832,12 @@ export class ReplaySource implements TrainerSource {
 
     const next = this.#frames[this.#index + 1];
     this.#index += 1;
-    this.#schedule(next === undefined ? 500 : Math.max(0, next.t - frame.t));
+    if (next !== undefined) {
+      this.#schedule(Math.max(0, next.t - frame.t));
+    } else if (this.#loop) {
+      this.#schedule(500);
+    }
+    // Otherwise the capture is finished and not looping: arm nothing.
   }
 }
 ```
