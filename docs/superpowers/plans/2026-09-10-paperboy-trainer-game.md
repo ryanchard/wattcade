@@ -2438,6 +2438,11 @@ Open http://localhost:5180 in **Chrome or Edge** (Safari and Firefox have no
 Web Bluetooth). Close Zwift and the Wahoo app first — a trainer pairs to one
 client at a time. Wake the trainer by pedalling, then press Connect.
 
+Once the log says control was granted, click **Run grade sweep** and keep
+pedalling steadily through the whole thing. It takes about 48 seconds and
+steps through 0, 2, 4, 6, 3, 0, -3 and 0 percent, six seconds each, then
+resets to 0%.
+
 Record the answers:
 
 1. Does the device chooser list the KICKR?
@@ -2450,15 +2455,24 @@ Record the answers:
 5. Do the decoded power and cadence match what the Wahoo app shows for the
    same effort?
 
-Then ride 60+ seconds with varied effort, press **Download capture**, and
-commit the file:
+Then ride 60+ seconds with varied effort — the sweep itself counts, frames
+record continuously from the moment Connect succeeds — press **Download
+capture**, and commit the file:
 
+    mkdir -p packages/trainer/test/fixtures
     cp ~/Downloads/kickr-capture.json packages/trainer/test/fixtures/kickr-capture.json
 
 That activates a test which is skipped until the file exists — it replays
 every recorded frame through the parser and asserts the decoded values are
 physically plausible. It is how we find out whether the parser, written
 against the spec, agrees with what this firmware actually sends.
+
+## If you close the tab mid-sweep
+
+The page tries to reset resistance to 0% on unload, but that is best-effort
+and may not land: `beforeunload` cannot wait for a Bluetooth write to
+complete. If you close the tab at 6% the trainer can stay there. Reopen the
+page, reconnect, and run the sweep again — it ends by resetting to 0%.
 
 If the answer to question 4 is **no**, the game still works: it degrades to
 read-only arcade tuning, and terrain becomes visual rather than felt.
@@ -2795,29 +2809,129 @@ export class ReplaySource implements TrainerSource {
 }
 ```
 
-- [ ] **Step 4: Add a fixture test proving the parser handles real hardware output**
+- [ ] **Step 4: Generate a synthetic capture so CI has something to replay**
+
+The real hardware capture does not exist yet — recording it needs a KICKR and
+a rider. Until then CI still needs a capture to exercise, so build one from
+known values. Create `packages/trainer/test/fixtures/make-sample-capture.mjs`:
+
+```js
+// Regenerate with: node packages/trainer/test/fixtures/make-sample-capture.mjs
+// Builds a synthetic Indoor Bike Data capture from known values, so the
+// replay path is exercised in CI without hardware. This is NOT a substitute
+// for a real capture: it proves the plumbing, not that our reading of the
+// FTMS spec matches a real trainer's firmware.
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// flags 0x0044 = instantaneous speed (bit 0 clear) + cadence + power
+const FLAGS = 0x0044;
+
+function frame(speedKmh, cadenceRpm, powerW) {
+  const buf = new ArrayBuffer(8);
+  const v = new DataView(buf);
+  v.setUint16(0, FLAGS, true);
+  v.setUint16(2, Math.round(speedKmh * 100), true);
+  v.setUint16(4, Math.round(cadenceRpm * 2), true);
+  v.setInt16(6, Math.round(powerW), true);
+  return [...new Uint8Array(buf)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+const frames = [];
+let t = 0;
+for (let i = 0; i < 120; i++) {
+  // A plausible ride: warm up, two surges, ease off.
+  const phase = i / 120;
+  const power = Math.round(120 + 130 * Math.sin(phase * Math.PI * 3) ** 2);
+  const cadence = power < 10 ? 0 : Math.min(105, 70 + power / 12);
+  const speed = 12 + power / 12;
+  frames.push({ t, hex: frame(speed, cadence, power) });
+  t += 250; // 4 Hz, matching a real trainer's notify rate
+}
+
+const capture = {
+  version: 1,
+  device: 'Synthetic KICKR (generated, not real hardware)',
+  recordedAt: '2026-09-10T00:00:00.000Z',
+  frames,
+};
+
+const out = fileURLToPath(new URL('./sample-capture.json', import.meta.url));
+writeFileSync(out, `${JSON.stringify(capture, null, 2)}\n`);
+console.log(`wrote ${out} (${frames.length} frames)`);
+```
+
+Run it, and commit both the script and its output:
+
+```bash
+node packages/trainer/test/fixtures/make-sample-capture.mjs
+```
+
+Then append this test to `packages/trainer/test/replaySource.test.ts`:
+
+```ts
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { parseIndoorBikeData } from '../src/ftms/indoorBikeData.js';
+
+const fixture = (name: string) =>
+  fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
+
+function decodeAll(cap: Capture) {
+  return cap.frames.map((f) => {
+    const bytes = new Uint8Array(f.hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Number.parseInt(f.hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return parseIndoorBikeData(new DataView(bytes.buffer));
+  });
+}
+
+describe('synthetic capture', () => {
+  it('round-trips through the parser with plausible values', () => {
+    const cap = parseCapture(
+      JSON.parse(readFileSync(fixture('sample-capture.json'), 'utf8')),
+    );
+    expect(cap.frames.length).toBe(120);
+
+    const decoded = decodeAll(cap);
+    for (const d of decoded) {
+      expect(d.instantaneousPower).toBeGreaterThanOrEqual(0);
+      expect(d.instantaneousPower).toBeLessThan(600);
+      expect(d.instantaneousCadence).toBeLessThanOrEqual(110);
+      expect(d.instantaneousSpeed).toBeGreaterThan(0);
+      expect(d.instantaneousSpeed).toBeLessThan(30);
+    }
+    // The generated ride surges, so it must not be a flat line -- otherwise
+    // this fixture would pass even against a parser that returned constants.
+    const powers = decoded.map((d) => d.instantaneousPower ?? 0);
+    expect(Math.max(...powers) - Math.min(...powers)).toBeGreaterThan(50);
+  });
+});
+```
+
+- [ ] **Step 5: Add the conditional real-hardware fixture test**
+
+This is the test that actually answers "does our reading of the spec match
+this firmware". It stays skipped until someone runs the Milestone 0 probe and
+commits a capture, then turns itself on.
 
 Append to `packages/trainer/test/replaySource.test.ts`:
 
 ```ts
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+const REAL_CAPTURE = fixture('kickr-capture.json');
 
-describe('recorded KICKR capture', () => {
+// Skipped until someone runs the Milestone 0 probe (see
+// tools/ble-probe/README.md) and commits a capture. It then activates by
+// itself -- no code change needed.
+describe.skipIf(!existsSync(REAL_CAPTURE))('recorded KICKR capture', () => {
   it('decodes every frame to plausible values', () => {
-    const path = fileURLToPath(
-      new URL('./fixtures/kickr-capture.json', import.meta.url),
-    );
-    const cap = parseCapture(JSON.parse(readFileSync(path, 'utf8')));
+    const cap = parseCapture(JSON.parse(readFileSync(REAL_CAPTURE, 'utf8')));
     expect(cap.frames.length).toBeGreaterThan(50);
 
-    const src = new ReplaySource(cap);
-    for (const frame of cap.frames) {
-      const bytes = new Uint8Array(frame.hex.length / 2);
-      for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = Number.parseInt(frame.hex.slice(i * 2, i * 2 + 2), 16);
-      }
-      const d = parseIndoorBikeData(new DataView(bytes.buffer));
+    for (const d of decodeAll(cap)) {
       if (d.instantaneousPower !== null) {
         expect(d.instantaneousPower).toBeGreaterThanOrEqual(-50);
         expect(d.instantaneousPower).toBeLessThan(2000);
@@ -2829,27 +2943,29 @@ describe('recorded KICKR capture', () => {
         expect(d.instantaneousSpeed).toBeLessThan(30);
       }
     }
-    expect(src.kind).toBe('replay');
   });
 });
 ```
 
-Add the matching import of `parseIndoorBikeData` at the top of the file.
+If any assertion here fails once a real capture lands, the parser is
+misaligned against actual firmware — fix Task 2 rather than loosening the
+bounds. This test is the entire reason the capture gets recorded, and the
+synthetic fixture in Step 4 is explicitly not a substitute for it: a
+generator written from the same spec reading as the parser cannot detect a
+shared misreading.
 
-If any assertion fails, the parser is misaligned against real hardware — fix Task 2 rather than loosening the bounds here. This test is the entire reason the capture was recorded.
-
-- [ ] **Step 5: Export and verify**
+- [ ] **Step 6: Export and verify**
 
 Add `export * from './sources/replaySource.js';` to `packages/trainer/src/index.ts`.
 
 Run: `npx vitest run packages/trainer && npm run typecheck`
 Expected: all passing.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add packages/trainer
-git commit -m "feat: add replay trainer source validated against a real KICKR capture"
+git commit -m "feat: add replay trainer source with a synthetic capture fixture"
 ```
 
 ---
