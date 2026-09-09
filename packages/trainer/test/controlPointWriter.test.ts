@@ -69,13 +69,16 @@ describe('ControlPointWriter', () => {
     await w.requestControl();
     f.writes.length = 0;
 
-    for (let i = 0; i < 10; i++) w.setSimulation({ ...SIM, grade: i });
+    // Half-percent steps keep every value inside the +/-8 clamp, so the
+    // final one is uniquely identifiable. Whole numbers would not be:
+    // grade 8 and grade 9 both encode to 800 once clamped, and the test
+    // could no longer tell "last value" from "second-to-last".
+    for (let i = 0; i < 10; i++) w.setSimulation({ ...SIM, grade: i * 0.5 });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(f.writes).toHaveLength(1);
-    // The write carries the LAST value, grade 9 -> clamped to 8 (encodeSimulationParams
-    // enforces the +/-8% cap from Task 3) -> 800 -> 0x0320
-    expect(Array.from(f.writes[0]!).slice(3, 5)).toEqual([0x20, 0x03]);
+    // The write carries the LAST value, grade 4.5 -> 450 -> 0x01C2
+    expect(Array.from(f.writes[0]!).slice(3, 5)).toEqual([0xc2, 0x01]);
   });
 
   it('rate-limits simulation writes to the configured interval', async () => {
@@ -147,5 +150,17 @@ describe('ControlPointWriter', () => {
     w.setSimulation(SIM);
     await vi.advanceTimersByTimeAsync(1000);
     expect(f.writes).toHaveLength(0);
+  });
+
+  it('resolves an in-flight write when disposed mid-flight', async () => {
+    const f = fakeTransport();
+    f.setAutoRespond(false);
+    const w = new ControlPointWriter(f.transport);
+    const pending = w.requestControl();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.writes).toHaveLength(1); // in flight, no indication yet
+
+    w.dispose();
+    await expect(pending).resolves.toBe(false);
   });
 });

@@ -90,6 +90,15 @@ export class ControlPointWriter {
     this.#pendingSim = null;
     this.#queue.forEach((e) => e.resolve(false));
     this.#queue = [];
+    // A write may already be outstanding, awaiting an indication that will
+    // never come once we unsubscribe below. Resolve it rather than leaving
+    // its caller (e.g. a resetResistance() in flight during teardown)
+    // hanging forever.
+    if (this.#inFlight !== null) {
+      const entry = this.#inFlight;
+      this.#inFlight = null;
+      entry.resolve(false);
+    }
     this.#unsubscribe();
   }
 
