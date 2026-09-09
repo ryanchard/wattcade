@@ -13,6 +13,7 @@ export const RESULT_SUCCESS = 0x01;
 export const MAX_GRADE_PERCENT = 8;
 
 export function clampGrade(grade: number): number {
+  // NaN indicates an upstream bug; send flat road as a safe default to a device a rider is sitting on.
   if (Number.isNaN(grade)) return 0;
   return Math.max(-MAX_GRADE_PERCENT, Math.min(MAX_GRADE_PERCENT, grade));
 }

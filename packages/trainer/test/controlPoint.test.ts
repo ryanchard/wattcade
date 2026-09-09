@@ -74,4 +74,32 @@ describe('control point encoding', () => {
     const v = new DataView(Uint8Array.from([0x80, 0x00, 0x02]).buffer);
     expect(parseControlResponse(v).success).toBe(false);
   });
+
+  it('clamps over-range crr to 255', () => {
+    // crr 0.1 -> 1000, should clamp to 255
+    const out = encodeSimulationParams({
+      grade: 0, headwind: 0, crr: 0.1, cw: 0.51,
+    });
+    expect(bytes(out)[5]).toBe(255);
+  });
+
+  it('clamps negative crr to 0', () => {
+    // crr -0.01 -> -100, should clamp to 0
+    const out = encodeSimulationParams({
+      grade: 0, headwind: 0, crr: -0.01, cw: 0.51,
+    });
+    expect(bytes(out)[5]).toBe(0);
+  });
+
+  it('clamps over-range cw to 255', () => {
+    // cw 5.0 -> 500, should clamp to 255
+    const out = encodeSimulationParams({
+      grade: 0, headwind: 0, crr: 0.004, cw: 5.0,
+    });
+    expect(bytes(out)[6]).toBe(255);
+  });
+
+  it('clampGrade handles NaN by returning 0 (flat road safety default)', () => {
+    expect(clampGrade(NaN)).toBe(0);
+  });
 });
