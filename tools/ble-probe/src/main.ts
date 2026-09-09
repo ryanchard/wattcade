@@ -65,6 +65,8 @@ $('connect').addEventListener('click', async () => {
         log(`Start/Resume -> ${await writer.startOrResume()}`);
         ($('sweep') as HTMLButtonElement).disabled = false;
       }
+    } else {
+      log('Grade sweep unavailable: trainer exposes no control point. Questions 1, 2, and 5 can still be answered.');
     }
     ($('download') as HTMLButtonElement).disabled = false;
   } catch (err) {
@@ -73,15 +75,19 @@ $('connect').addEventListener('click', async () => {
 });
 
 $('sweep').addEventListener('click', async () => {
-  if (writer === null) return;
-  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  for (const grade of [0, 2, 4, 6, 3, 0, -3, 0]) {
-    log(`grade -> ${grade}%  (pedal and report what you feel)`);
-    writer.setSimulation({ grade, headwind: 0, crr: 0.004, cw: 0.51 });
-    await wait(6000);
+  try {
+    if (writer === null) return;
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    for (const grade of [0, 2, 4, 6, 3, 0, -3, 0]) {
+      log(`grade -> ${grade}%  (pedal and report what you feel)`);
+      writer.setSimulation({ grade, headwind: 0, crr: 0.004, cw: 0.51 });
+      await wait(6000);
+    }
+    await writer.resetResistance();
+    log('Sweep complete, resistance reset to 0%.');
+  } catch (err) {
+    log(`ERROR ${err instanceof Error ? err.message : String(err)}`);
   }
-  await writer.resetResistance();
-  log('Sweep complete, resistance reset to 0%.');
 });
 
 $('download').addEventListener('click', () => {
