@@ -24,8 +24,22 @@ describe('createWorld', () => {
 
   it('is reproducible from its seed', () => {
     const a = createWorld(42);
+    ensureBlocks(a);
     const b = createWorld(42);
-    expect(a.houses.map((h) => h.spec.id)).toEqual(b.houses.map((h) => h.spec.id));
+    ensureBlocks(b);
+    // Compare full house specs, not just ids: house ids are positional
+    // (`h-${index}-${i}`) and would match across any two seeds regardless
+    // of determinism. subscriber/mailboxLateral/porchLateral/windowLateral
+    // are the fields actually drawn from the seeded RNG.
+    expect(a.houses).toEqual(b.houses);
+  });
+
+  it('produces different houses for a different seed', () => {
+    const a = createWorld(42);
+    ensureBlocks(a);
+    const c = createWorld(43);
+    ensureBlocks(c);
+    expect(a.houses).not.toEqual(c.houses);
   });
 });
 
@@ -146,6 +160,13 @@ describe('advanceRider', () => {
 });
 
 describe('moveHazards', () => {
+  // NOTE: the weave branch is a function of absolute w.elapsed, which only
+  // advanceRider mutates. Every test below that needs real elapsed time to
+  // pass calls advanceRider alongside moveHazards each iteration, exactly
+  // as the real game loop must. A test that calls moveHazards alone with
+  // w.elapsed pinned at 0 cannot observe genuine motion in the weave
+  // branch — see the dedicated regression test below for why that matters.
+
   it('moves hazards marked as moving and leaves static ones alone', () => {
     const w = createWorld(42);
     ensureBlocks(w);
@@ -154,7 +175,10 @@ describe('moveHazards', () => {
     const movingBefore = moving ? { ...moving } : null;
     const stillBefore = still ? { ...still } : null;
 
-    for (let i = 0; i < 60; i++) moveHazards(w, 1 / 60);
+    for (let i = 0; i < 60; i++) {
+      advanceRider(w, 150, DEFAULT_RIDER, 1 / 60);
+      moveHazards(w, 1 / 60);
+    }
 
     if (movingBefore && moving) {
       const moved =
@@ -165,6 +189,44 @@ describe('moveHazards', () => {
     if (stillBefore && still) {
       expect(still.distance).toBeCloseTo(stillBefore.distance, 6);
       expect(still.lateral).toBeCloseTo(stillBefore.lateral, 6);
+    }
+  });
+
+  it('genuinely oscillates a non-car moving hazard over time, rather than jumping once and freezing', () => {
+    const w = createWorld(42);
+    ensureBlocks(w);
+    // Pick a non-car moving hazard explicitly: taking "whichever is first"
+    // moving hazard could silently pick a car (whose motion is a plain
+    // distance integration, not a weave) if the seed or templates change,
+    // and a car passing this test would prove nothing about the weave path.
+    const hazard = w.hazards.find((h) => h.spec.kind !== 'car' && h.spec.moving);
+    expect(hazard).toBeDefined();
+
+    const laterals = new Set<number>();
+    for (let i = 0; i < 300; i++) {
+      advanceRider(w, 150, DEFAULT_RIDER, 1 / 60);
+      moveHazards(w, 1 / 60);
+      laterals.add(Number(hazard!.lateral.toFixed(3)));
+    }
+    // A hazard that only jumps once off its spawn point and then freezes
+    // (the historical bug: absolute assignment with elapsed pinned at 0)
+    // would produce exactly one distinct value here. Genuine periodic
+    // motion produces many.
+    expect(laterals.size).toBeGreaterThan(5);
+  });
+
+  it('keeps woven hazards clear of the house footprint and the far verge', () => {
+    const w = createWorld(42);
+    ensureBlocks(w);
+    for (let i = 0; i < 3000; i++) {
+      advanceRider(w, 150, DEFAULT_RIDER, 1 / 60);
+      moveHazards(w, 1 / 60);
+      for (const h of w.hazards) {
+        if (h.spec.moving && h.spec.kind !== 'car') {
+          expect(h.lateral).toBeGreaterThanOrEqual(1.5);
+          expect(h.lateral).toBeLessThanOrEqual(RIDABLE_MAX);
+        }
+      }
     }
   });
 

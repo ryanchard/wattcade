@@ -160,6 +160,17 @@ export function advanceRider(
   w.elapsed += dt;
 }
 
+/**
+ * The weave branch below is a function of absolute `w.elapsed`, not of the
+ * `dt` passed in — `dt` only matters to the `car` branch, which integrates
+ * a position. `w.elapsed` is advanced solely by `advanceRider`, so callers
+ * MUST call `advanceRider` before `moveHazards` each frame for weaving
+ * hazards to move at all. The upside of keying off absolute time rather
+ * than integrating a per-call delta: calling `moveHazards` more than once
+ * within the same frame (same `w.elapsed`) is harmless and idempotent for
+ * every non-car hazard, since it always recomputes the same absolute
+ * position rather than advancing it further.
+ */
 export function moveHazards(w: WorldState, dt: number): void {
   for (const h of w.hazards) {
     if (!h.spec.moving) continue;
@@ -168,10 +179,12 @@ export function moveHazards(w: WorldState, dt: number): void {
       // Traffic runs along the road, oncoming.
       h.distance -= h.spec.speed * dt;
     } else {
-      // Everything else weaves across its own band.
+      // Everything else weaves across its own band. Clamp the woven
+      // lateral so the swing can never carry a hazard into the house
+      // footprint (lateral < 1.5) or past the ridable band's far edge.
       const t = w.elapsed + h.spec.phase * 10;
       const swing = Math.sin(t * 0.8) * 0.8;
-      h.lateral = h.spec.lateral + swing;
+      h.lateral = Math.max(1.5, Math.min(RIDABLE_MAX, h.spec.lateral + swing));
       h.distance = h.spec.distance + Math.sin(t * 0.4) * 2;
     }
   }
