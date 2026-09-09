@@ -260,8 +260,9 @@ beyond timing.
 | Subscriber window smashed | −250, subscriber lost for the rest of the run |
 | Every subscriber on a block served | 1000 block bonus |
 
-Points from a scoring event are multiplied by the current combo multiplier before
-being added to the score. The block bonus is not multiplied.
+Positive points from a scoring event are multiplied by the current combo multiplier
+before being added to the score. Penalties and the block bonus are not multiplied —
+multiplying a penalty would make a good run punish mistakes disproportionately.
 
 A **combo multiplier** starts at 1× and rises one step per successful delivery,
 capping at 8×. A successful delivery is a paper landing in a mailbox or on a porch.
@@ -316,7 +317,7 @@ Test-driven, using Vitest on the shared packages.
 - Control-point encoding checked byte-for-byte against the spec tables above,
   including negative grades and clamping.
 - Write serialisation and rate limiting, on fake timers.
-- Physics steady-states: 200 W on the flat settles near 30 km/h; power to zero decays
+- Physics steady-states: 200 W on the flat settles in the low-30s km/h; power to zero decays
   speed monotonically; a positive grade lowers steady-state speed for fixed power.
 
 **`packages/game-core`**
