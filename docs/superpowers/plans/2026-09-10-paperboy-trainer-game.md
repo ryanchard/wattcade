@@ -2009,6 +2009,7 @@ export class FtmsSource implements TrainerSource {
   #writer: ControlPointWriter | null = null;
   #teardown: Unsubscribe[] = [];
   #canControl = false;
+  #starting = false;
 
   #sampleListeners = new Set<(s: TrainerSample) => void>();
   #statusListeners = new Set<(s: TrainerStatus) => void>();
@@ -2022,11 +2023,19 @@ export class FtmsSource implements TrainerSource {
   }
 
   async start(): Promise<void> {
+    // Re-entrancy guard. start() awaits #connect(), so checking #link alone
+    // is not enough: two rapid calls would both pass that check before
+    // either assigns it. A synchronous flag closes the window. It must be
+    // cleared on every exit path, or a failed first connect wedges the
+    // source permanently.
+    if (this.#starting || this.#link !== null) return;
+    this.#starting = true;
     this.#emitStatus('connecting', null, null);
     let link: GattLink;
     try {
       link = await this.#connect();
     } catch (err) {
+      this.#starting = false;
       this.#emitStatus('error', null, describeError(err));
       return;
     }
@@ -2040,6 +2049,7 @@ export class FtmsSource implements TrainerSource {
     try {
       await link.startNotifications();
     } catch (err) {
+      this.#starting = false;
       this.#emitStatus('error', link.deviceName, describeError(err));
       return;
     }
@@ -2051,6 +2061,7 @@ export class FtmsSource implements TrainerSource {
       if (this.#canControl) await writer.startOrResume();
     }
 
+    this.#starting = false;
     this.#emitStatus(
       'connected',
       link.deviceName,
@@ -2059,11 +2070,19 @@ export class FtmsSource implements TrainerSource {
   }
 
   async stop(): Promise<void> {
+    // Nothing to tear down: stay silent rather than announce a disconnect
+    // that never happened, which a status-driven UI would believe.
+    if (this.#link === null && !this.#starting) return;
+    this.#starting = false;
     if (this.#writer !== null) {
       await this.#writer.resetResistance();
       this.#writer.dispose();
       this.#writer = null;
     }
+    // Order matters: unsubscribing onDisconnect BEFORE calling disconnect()
+    // stops the gattserverdisconnected event that our own disconnect fires
+    // from re-entering #handleDisconnect and emitting a second, spurious
+    // status. Do not reorder these.
     this.#teardown.forEach((fn) => fn());
     this.#teardown = [];
     this.#canControl = false;
@@ -2390,12 +2409,75 @@ window.addEventListener('beforeunload', () => {
 });
 ```
 
-- [ ] **Step 3: Run it against the real trainer**
+- [ ] **Step 3: Build and typecheck it (no hardware needed)**
 
-Run: `npm install && npm --workspace @paperboy/ble-probe run dev`
-Open `http://localhost:5180` in Chrome. Wake the trainer by pedalling before connecting.
+The probe cannot be *run* meaningfully without a KICKR, but it must still be
+proven to build:
 
-Record the answers to these, since they decide what Phase 4 can rely on:
+Run: `npm install && npm --workspace @paperboy/ble-probe run build && npm run typecheck`
+Expected: a clean Vite build and no type errors.
+
+Then confirm by inspection that `navigator.bluetooth` is reached only from
+inside the click handler — never at module scope — since Web Bluetooth
+requires a user gesture and the page must load without a radio present.
+
+- [ ] **Step 4: Write the hardware checklist for the rider**
+
+Create `tools/ble-probe/README.md` recording exactly what the person with the
+trainer has to do, and what to write down. This is Milestone 0's real output
+and it is performed by a human, not by CI:
+
+```markdown
+# KICKR probe — Milestone 0
+
+Run this BEFORE trusting the game against real hardware.
+
+    npm --workspace @paperboy/ble-probe run dev
+
+Open http://localhost:5180 in **Chrome or Edge** (Safari and Firefox have no
+Web Bluetooth). Close Zwift and the Wahoo app first — a trainer pairs to one
+client at a time. Wake the trainer by pedalling, then press Connect.
+
+Record the answers:
+
+1. Does the device chooser list the KICKR?
+   If it is empty: check Zwift/Wahoo are closed, and that Chrome has
+   Bluetooth permission in macOS System Settings > Privacy & Security.
+2. Does the log say `Control point present: true`?
+3. Does `Request Control` say GRANTED?
+4. **During the grade sweep, does pedalling effort actually change at 4% and
+   6%?** This is the question the whole milestone exists to answer.
+5. Do the decoded power and cadence match what the Wahoo app shows for the
+   same effort?
+
+Then ride 60+ seconds with varied effort, press **Download capture**, and
+commit the file:
+
+    cp ~/Downloads/kickr-capture.json packages/trainer/test/fixtures/kickr-capture.json
+
+That activates a test which is skipped until the file exists — it replays
+every recorded frame through the parser and asserts the decoded values are
+physically plausible. It is how we find out whether the parser, written
+against the spec, agrees with what this firmware actually sends.
+
+If the answer to question 4 is **no**, the game still works: it degrades to
+read-only arcade tuning, and terrain becomes visual rather than felt.
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add tools/ble-probe
+git commit -m "feat: add Milestone 0 hardware probe"
+```
+
+**Gate — for the human, not for CI.** The recorded capture and the answers to
+those five questions are the deliverable. Until someone runs this against the
+real trainer, the FTMS parser is validated only against hand-derived spec
+vectors, and whether this firmware honours browser-issued simulation writes is
+unknown. Phase 4's terrain feedback rests on question 4.
+
+<!-- retired steps, kept for the record:
 
 1. Does the device chooser list the KICKR? If it is empty, check that Zwift and the Wahoo app are closed and that Chrome has Bluetooth permission in macOS System Settings.
 2. Does `Control point present` say true?
@@ -2411,15 +2493,7 @@ Ride for at least 60 seconds with varied effort, download the capture, and commi
 mkdir -p packages/trainer/test/fixtures
 cp ~/Downloads/kickr-capture.json packages/trainer/test/fixtures/kickr-capture.json
 ```
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tools/ble-probe packages/trainer/test/fixtures
-git commit -m "feat: add Milestone 0 hardware probe and record a real KICKR capture"
-```
-
-**Gate:** if question 4 is "no", `canControlResistance` will be false in practice. The game still works — it degrades to read-only arcade tuning as the spec allows — but note it before continuing, because the terrain-feedback parts of Phase 4 become visual only.
+-->
 
 ---
 
