@@ -9,7 +9,14 @@ export const AIR_DENSITY = 1.225;
  */
 export const V_MIN = 0.5;
 
-/** Ceiling that keeps a large timestep from integrating into nonsense. */
+/**
+ * Ceiling that keeps a large timestep from integrating into nonsense.
+ * This is a numerical guard, not a gameplay limiter. The steepest grade
+ * the game generates is 6%, and the hard trainer clamp is 8%; these give
+ * unclamped steady states of ~18.5 and ~20.4 m/s even at 400 W. Reaching
+ * 30 m/s would require roughly a 20% descent, which the route generator
+ * never produces.
+ */
 const V_MAX = 30;
 
 export interface RiderProfile {
@@ -47,6 +54,11 @@ function resistiveForce(
   const gravity = rider.massKg * G * Math.sin(theta);
   const rolling = input.crr * rider.massKg * G * Math.cos(theta);
   const apparent = speed + input.headwind;
+  // Signed square: apparent * Math.abs(apparent) instead of apparent ** 2.
+  // Drag must oppose the direction of airflow, not always oppose motion.
+  // A plain square would make a tailwind stronger than the rider's speed
+  // push them *backwards*; the signed square keeps drag opposing the actual
+  // direction of apparent airflow.
   const aero =
     0.5 * AIR_DENSITY * rider.cdA * apparent * Math.abs(apparent);
   return gravity + rolling + aero;

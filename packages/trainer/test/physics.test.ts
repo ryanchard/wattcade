@@ -58,9 +58,11 @@ describe('stepPhysics', () => {
   });
 
   it('decays to a crawl when power stops', () => {
-    // Coasting from 12 m/s on the flat, rolling resistance alone takes
-    // about 113 s to bring the rider to a stop -- at 60 s they are still
-    // doing nearly 3 m/s. Two minutes is the honest duration here.
+    // Coasting from 12 m/s on the flat, aero drag dominates the early decay
+    // (~28 N vs ~4 N rolling resistance at 12 m/s). The decay takes about
+    // 113 s total to stop; at 60 s the rider is still doing nearly 3 m/s.
+    // Rolling resistance finishes the job once speed drops below ~5 m/s.
+    // Two minutes is the honest duration here.
     let s: PhysicsState = { speed: 12, distance: 0 };
     for (let i = 0; i < 60 * 120; i++) {
       s = stepPhysics(s, flat(0), DEFAULT_RIDER, 1 / 60);
@@ -87,6 +89,22 @@ describe('stepPhysics', () => {
     expect(s.speed).toBeLessThan(road);
   });
 
+  it('accelerates with a tailwind strong enough to overcome resistance', () => {
+    // A tailwind is represented as negative headwind. With headwind = -10
+    // (10 m/s tailwind) and the rider at 2 m/s, apparent wind is -8 m/s
+    // from behind, creating drag that assists. Starting at 0 power, aero
+    // drag exceeds rolling resistance, causing acceleration. This test
+    // verifies the signed-square aero term keeps drag opposing airflow,
+    // not motion: a plain square would decelerate the rider here.
+    let s: PhysicsState = { speed: 2, distance: 0 };
+    const initialSpeed = s.speed;
+    for (let i = 0; i < 6; i++) {
+      s = stepPhysics(s, { powerWatts: 0, gradePercent: 0, crr: DEFAULT_RIDER.crr, headwind: -10 },
+        DEFAULT_RIDER, 1 / 60);
+    }
+    expect(s.speed).toBeGreaterThan(initialSpeed);
+  });
+
   it('accumulates distance as the integral of speed', () => {
     let s: PhysicsState = { speed: 10, distance: 0 };
     for (let i = 0; i < 60; i++) {
@@ -98,11 +116,23 @@ describe('stepPhysics', () => {
   });
 
   it('is stable at a large timestep', () => {
+    // Start with a plausible frame drop (dt=0.25, like 4 fps)
     let s: PhysicsState = { speed: 0.5, distance: 0 };
     for (let i = 0; i < 200; i++) {
       s = stepPhysics(s, flat(400), DEFAULT_RIDER, 0.25);
     }
     expect(Number.isFinite(s.speed)).toBe(true);
     expect(s.speed).toBeLessThan(30);
+
+    // Test adversarial case: dt large enough to engage guards. With dt=20 and
+    // high power, forward Euler would overshoot and oscillate without V_MAX.
+    // The guards keep speed finite and non-negative.
+    s = { speed: 0.5, distance: 0 };
+    for (let i = 0; i < 100; i++) {
+      s = stepPhysics(s, flat(400), DEFAULT_RIDER, 20);
+    }
+    expect(Number.isFinite(s.speed)).toBe(true);
+    expect(s.speed).toBeGreaterThanOrEqual(0);
+    expect(s.speed).toBeLessThanOrEqual(30);
   });
 });
