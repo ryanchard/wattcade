@@ -4252,9 +4252,12 @@ git commit -m "feat: persist run stats and per-seed personal bests"
 ### Task 14: Isometric projection
 
 **Files:**
-- Create: `apps/canvas/package.json`, `apps/canvas/vite.config.ts`, `apps/canvas/index.html`, `apps/canvas/tsconfig.json`
+- Create: `apps/canvas/package.json`, `apps/canvas/vite.config.ts`, `apps/canvas/tsconfig.json`
 - Create: `apps/canvas/src/iso.ts`
 - Test: `apps/canvas/test/iso.test.ts`
+
+`index.html` is deliberately NOT created here — there is nothing to serve yet.
+Task 18 adds it along with the bootstrap.
 
 **Interfaces:**
 - Consumes: nothing.
@@ -4448,6 +4451,16 @@ export function worldToScreen(
  * Painter's-algorithm sort key. Camera-independent on purpose: the camera
  * term is constant within a frame, so this orders identically to screen y
  * while being computable once per entity rather than once per frame.
+ *
+ * Sorting is by GROUND FOOTPRINT, and height is deliberately not part of it:
+ * entities are anchored at their footprint and drawn upward, so altitude
+ * positions a sprite on screen without changing what it occludes. The
+ * consequence worth knowing: two entities sharing a footprint tie no matter
+ * how far apart they are vertically, so a paper arcing directly over a house
+ * ties with it and their order falls to array position. Accept that (papers
+ * are small and rarely land exactly on a house's footprint line) or tie-break
+ * explicitly in the renderer. If height is ever added to this key, it must
+ * stay camera-independent or the once-per-entity property is lost.
  */
 export function depthKey(distance: number, lateral: number): number {
   return lateral - distance;
