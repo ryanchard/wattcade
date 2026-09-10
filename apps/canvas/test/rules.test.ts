@@ -4,7 +4,7 @@ import { BLOCK_LENGTH_M, classifyLanding } from '@paperboy/game-core';
 import {
   MAX_PAPERS, START_PAPERS, createWorld, ensureBlocks,
 } from '../src/world.js';
-import type { HouseState, WorldState } from '../src/world.js';
+import type { HazardState, HouseState, WorldState } from '../src/world.js';
 import {
   applyCrash, collectStacks, detectCollision,
   resolveBlocks, resolvePassedHouses, stepWorld, throwPaper, updatePapers,
@@ -18,6 +18,14 @@ function house(over: Partial<HouseState['spec']> = {}): HouseState {
     },
     delivered: false, windowBroken: false, resolved: false,
   };
+}
+
+function hazard(over: Partial<HazardState['spec']> = {}): HazardState {
+  const spec = {
+    id: 'z-test', kind: 'dog' as const, distance: 100, lateral: 3.8, width: 1,
+    speed: 0, phase: 0, moving: false, ...over,
+  };
+  return { spec, distance: spec.distance, lateral: spec.lateral };
 }
 
 function ready(seed = 42): WorldState {
@@ -317,6 +325,28 @@ describe('collisions', () => {
     w.rider.lateral = h.lateral;
     w.rider.invulnerableUntil = w.elapsed + 1;
     expect(detectCollision(w)).toBeNull();
+  });
+
+  it('a car is 2.0 m deep to match its drawn box, wider hazards are not', () => {
+    // Collision half-depth mirrors the box the renderer actually draws
+    // (render/scene.ts: depth 4 for a car, 1 for everything else), halved.
+    // 2.0 m sits inside RIDER_HALF_LENGTH (0.75) + a car's half-depth (2.0)
+    // = 2.75 m, but outside RIDER_HALF_LENGTH + a non-car half-depth (0.5)
+    // = 1.25 m. Before this fix every hazard shared a single 0.6 m
+    // half-depth, so a car's hitbox was far shorter than its sprite.
+    const car = hazard({ id: 'car-test', kind: 'car' });
+    const wCar = ready();
+    wCar.hazards = [car];
+    wCar.rider.lateral = car.lateral;
+    wCar.rider.distance = car.distance + 2.0;
+    expect(detectCollision(wCar)).toBe(car);
+
+    const dog = hazard({ id: 'dog-test', kind: 'dog' });
+    const wDog = ready();
+    wDog.hazards = [dog];
+    wDog.rider.lateral = dog.lateral;
+    wDog.rider.distance = dog.distance + 2.0;
+    expect(detectCollision(wDog)).toBeNull();
   });
 });
 

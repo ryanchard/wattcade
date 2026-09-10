@@ -1,7 +1,7 @@
 import {
   BLOCK_LENGTH_M, applyScoreEvent, classifyLanding,
 } from '@paperboy/game-core';
-import type { LandingOutcome, ScoreEvent } from '@paperboy/game-core';
+import type { HazardKind, LandingOutcome, ScoreEvent } from '@paperboy/game-core';
 import type { RiderProfile } from '@paperboy/trainer';
 import {
   MAX_PAPERS, STACK_PAPERS,
@@ -16,8 +16,22 @@ export const GRAVITY = 9.8;
 
 export const RIDER_HALF_WIDTH = 0.4;
 export const RIDER_HALF_LENGTH = 0.75;
-export const HAZARD_HALF_DEPTH = 0.6;
 export const INVULNERABLE_S = 1.5;
+
+/**
+ * Collision half-depth along the road, per hazard kind. These numbers are
+ * HALF of the box `depth` the renderer actually draws — render/scene.ts's
+ * `depth: item.hazard.spec.kind === 'car' ? 4 : 1` — so the hitbox agrees
+ * with the sprite instead of being an independently guessed constant.
+ * Version B (apps/phaser/src/scenes/StreetScene.ts and views.ts) derives its
+ * hazard zone from the identical `kind === 'car' ? 4 : 1` expression: if one
+ * side's drawn depth changes, both this function and that expression must
+ * change together, or the two engines' collision thresholds will diverge
+ * again.
+ */
+export function hazardHalfDepth(kind: HazardKind): number {
+  return kind === 'car' ? 2.0 : 0.5;
+}
 export const HOUSE_RESOLVE_MARGIN_M = 8;
 export const STACK_PICKUP_DISTANCE_M = 1.5;
 export const STACK_PICKUP_LATERAL_M = 1.0;
@@ -151,7 +165,7 @@ export function detectCollision(w: WorldState): HazardState | null {
   if (w.elapsed < w.rider.invulnerableUntil) return null;
   for (const h of w.hazards) {
     const dGap = Math.abs(h.distance - w.rider.distance);
-    if (dGap > RIDER_HALF_LENGTH + HAZARD_HALF_DEPTH) continue;
+    if (dGap > RIDER_HALF_LENGTH + hazardHalfDepth(h.spec.kind)) continue;
     const lGap = Math.abs(h.lateral - w.rider.lateral);
     if (lGap > RIDER_HALF_WIDTH + h.spec.width / 2) continue;
     return h;
