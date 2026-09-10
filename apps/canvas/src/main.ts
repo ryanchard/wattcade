@@ -161,9 +161,27 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('beforeunload', () => {
+function releaseTrainer(): void {
   source?.setSimulation(FLAT_SIMULATION);
   void source?.stop();
+}
+window.addEventListener('beforeunload', releaseTrainer);
+// beforeunload does not fire reliably on mobile/bfcache navigations —
+// pagehide is the belt to its suspenders.
+window.addEventListener('pagehide', releaseTrainer);
+
+// Backgrounding the tab (or letting the screen sleep) can stop rAF from
+// running at all, so without this the last grade sent to the trainer — up
+// to 6% — stays applied indefinitely. Setting paused makes the frame loop's
+// own setSimulation call flat if it does run again; the direct call here
+// covers the case where it doesn't run again for a while (rAF fully
+// suspended), so the trainer is relaxed the moment the tab is hidden either
+// way. This does NOT auto-unpause on return — that choice belongs to the
+// rider.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || session === null) return;
+  session.paused = true;
+  source?.setSimulation(FLAT_SIMULATION);
 });
 
 showMenu();

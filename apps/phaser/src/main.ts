@@ -150,9 +150,26 @@ function endRun(): void {
   document.getElementById('menu')!.addEventListener('click', showMenu);
 }
 
-window.addEventListener('beforeunload', () => {
+function releaseTrainer(): void {
   source?.setSimulation(FLAT_SIMULATION);
   void source?.stop();
+}
+window.addEventListener('beforeunload', releaseTrainer);
+// beforeunload does not fire reliably on mobile/bfcache navigations —
+// pagehide is the belt to its suspenders.
+window.addEventListener('pagehide', releaseTrainer);
+
+// Backgrounding the tab (or letting the screen sleep) must not leave
+// resistance applied indefinitely. Pausing makes the 30 Hz interval above
+// send FLAT_SIMULATION on its own (run.effectiveSimulation() while
+// run.paused), but that interval is throttled in a hidden tab, so the
+// direct call here relaxes the trainer immediately rather than waiting on
+// whatever the throttled interval's next tick happens to be. This does NOT
+// auto-unpause on return — that choice belongs to the rider.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden || street.run === null) return;
+  street.run.paused = true;
+  source?.setSimulation(FLAT_SIMULATION);
 });
 
 showMenu();
