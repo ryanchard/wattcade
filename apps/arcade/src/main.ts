@@ -20,7 +20,7 @@ import { createInput } from './input.js';
 import { loadProfile, saveProfile, withEntries } from './profile.js';
 import {
   FLAT_SIMULATION, clearRide, createRide, finishRide, releaseRide, setHidden,
-  setPower, startRide, stopRide, tickRide, togglePaused,
+  setCadence, setPower, startRide, stopRide, tickRide, togglePaused,
 } from './ride.js';
 import { loadStats, recordRun } from './stats.js';
 import { describeTrainer } from './trainerStatus.js';
@@ -82,10 +82,18 @@ async function useSource(next: TrainerSource): Promise<void> {
     trainer = describeTrainer(next.kind, s);
     // A dropped link must not leave the rider coasting forever on the last
     // reading — decay it toward zero the way stopping pedalling would.
-    if (s.kind === 'disconnected' || s.kind === 'error') setPower(ride, 0);
+    if (s.kind === 'disconnected' || s.kind === 'error') {
+      setPower(ride, 0);
+      // Cadence goes to "no reading", not to zero: a dropped link is not the
+      // rider having stopped pedalling, and a cadence game should say so.
+      setCadence(ride, null);
+    }
     if (ride.session === null) showHub();
   });
-  next.onSample((sample) => { setPower(ride, sample.power); });
+  next.onSample((sample) => {
+    setPower(ride, sample.power);
+    setCadence(ride, sample.cadence);
+  });
   await next.start();
 }
 

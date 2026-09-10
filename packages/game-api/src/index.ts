@@ -147,6 +147,16 @@ export interface GameSession {
   handleKeys?(keys: GameKeys): void;
 
   /**
+   * Cadence in rpm as the trainer last reported it, or null when the trainer
+   * reports none. Forwarded once per frame, before the substeps, and — unlike
+   * power — NOT eased: cadence is a control axis, and smoothing it would blunt
+   * the exact thing a cadence game reads. Null is a state, not an error; a
+   * game that steers on cadence is expected to say so on screen rather than
+   * sit at zero looking broken. Games that do not implement this never see it.
+   */
+  setCadence?(rpm: number | null): void;
+
+  /**
    * The resistance this game WANTS right now. The shell decides what is
    * actually sent — it will send flat instead whenever the rider is not being
    * asked to push against anything.

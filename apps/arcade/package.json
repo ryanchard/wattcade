@@ -8,6 +8,7 @@
     "@paperboy/game-core": "*",
     "@paperboy/game-pack": "*",
     "@paperboy/game-paperboy": "*",
+    "@paperboy/game-spincycle": "*",
     "@paperboy/game-velodrome": "*",
     "@paperboy/trainer": "*"
   }

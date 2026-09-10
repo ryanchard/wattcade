@@ -1,4 +1,5 @@
 export * from './rng.js';
+export * from './cadence.js';
 export * from './difficulty.js';
 export * from './route.js';
 export * from './hazard.js';

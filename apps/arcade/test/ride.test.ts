@@ -16,7 +16,7 @@ import type {
 import {
   FIXED_DT, FLAT_SIMULATION, MAX_FRAME_S, MAX_SUBSTEPS, NO_KEYS, POWER_TAU_S,
   advanceRide, clearRide, createRide, effectiveSimulation, finishRide,
-  isUnderLoad, releaseRide, setHidden, setPaused, setPower, startRide,
+  isUnderLoad, releaseRide, setCadence, setHidden, setPaused, setPower, startRide,
   stopRide, tickRide, togglePaused,
 } from '../src/ride.js';
 import type { FrameInput, Ride } from '../src/ride.js';
@@ -27,6 +27,7 @@ const STEEP: SimulationParams = { grade: 6, headwind: 2, crr: 0.009, cw: 0.44 };
 class FakeSession implements GameSession {
   advanced: Array<{ dt: number; watts: number }> = [];
   animated: number[] = [];
+  cadences: Array<number | null> = [];
   keyFrames = 0;
   over = false;
   stopped = false;
@@ -44,6 +45,7 @@ class FakeSession implements GameSession {
   }
 
   animate(dtSeconds: number): void { this.animated.push(dtSeconds); }
+  setCadence(rpm: number | null): void { this.cadences.push(rpm); }
   handleKeys(): void { this.keyFrames += 1; }
   render(): void { /* nothing to draw in a test */ }
   simulation(): SimulationParams { return STEEP; }
@@ -351,6 +353,56 @@ describe('setPower', () => {
       setPower(ride, bad);
       expect(ride.powerTarget).toBe(0);
     }
+  });
+});
+
+describe('setCadence', () => {
+  it('passes a plausible reading straight through, unsmoothed', () => {
+    const ride = createRide();
+    setCadence(ride, 93);
+    expect(ride.cadenceRpm).toBe(93);
+  });
+
+  it('starts with no reading rather than with zero', () => {
+    expect(createRide().cadenceRpm).toBeNull();
+  });
+
+  it('keeps "no sensor" distinct from "not pedalling"', () => {
+    const ride = createRide();
+    setCadence(ride, 0);
+    expect(ride.cadenceRpm).toBe(0);
+    setCadence(ride, null);
+    expect(ride.cadenceRpm).toBeNull();
+  });
+
+  it('treats a glitched reading as no reading rather than clamping it', () => {
+    const ride = createRide();
+    for (const bad of [Number.NaN, -3, 9999, Number.POSITIVE_INFINITY]) {
+      setCadence(ride, bad);
+      expect(ride.cadenceRpm).toBeNull();
+    }
+  });
+
+  it('reaches the session once per frame, however many substeps it runs', () => {
+    const { ride, session } = riding();
+    setCadence(ride, 88);
+    advanceRide(ride, frame(1 / 60));
+    expect(session.cadences).toEqual([88]);
+    expect(session.advanced.length).toBeGreaterThan(1);
+  });
+
+  it('tells a session there is no reading rather than saying nothing', () => {
+    const { ride, session } = riding();
+    advanceRide(ride, frame(1 / 60));
+    expect(session.cadences).toEqual([null]);
+  });
+
+  it('does not reach a session while the run is not under load', () => {
+    const { ride, session } = riding();
+    setCadence(ride, 88);
+    setPaused(ride, true);
+    advanceRide(ride, frame(1 / 60));
+    expect(session.cadences).toEqual([]);
   });
 });
 

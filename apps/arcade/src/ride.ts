@@ -41,6 +41,11 @@ export const MAX_FRAME_S = 0.25;
 /** A trainer reporting more than this is misbehaving. Clamp it. */
 export const MAX_PLAUSIBLE_WATTS = 2000;
 
+/** Likewise for cadence: nobody pedals faster than this, so a reading above
+ * it is a decoding glitch rather than a rider, and is treated as no reading
+ * at all. Cadence-steered games would otherwise be flung by one bad frame. */
+export const MAX_PLAUSIBLE_RPM = 250;
+
 /**
  * The flat, unloaded simulation a resting trainer should see: no grade, no
  * headwind, a token rolling resistance, and a drag coefficient that does not
@@ -64,6 +69,9 @@ export interface Ride {
   powerTarget: number;
   /** Watts after easing — what the session actually integrates. */
   powerCurrent: number;
+  /** Cadence as last reported, or null when the trainer reports none. Passed
+   * through unsmoothed — see `GameSession.setCadence`. */
+  cadenceRpm: number | null;
   /** Time left over from the last frame, too small to fill a substep. Without
    * it, every frame at 144 Hz (6.9 ms < 8.3 ms) advances nothing at all. */
   accumulator: number;
@@ -94,6 +102,7 @@ export function createRide(): Ride {
     released: false,
     powerTarget: 0,
     powerCurrent: 0,
+    cadenceRpm: null,
     accumulator: 0,
     elapsedS: 0,
     ended: false,
@@ -128,6 +137,20 @@ export function setPower(r: Ride, watts: number | null): void {
     return;
   }
   r.powerTarget = Math.min(MAX_PLAUSIBLE_WATTS, watts);
+}
+
+/**
+ * The trainer's latest cadence, or null when it reports none. Null is passed
+ * through rather than turned into zero, because "not pedalling" and "this
+ * trainer has no cadence sensor" are different facts and a cadence game has
+ * to tell the rider which one it is looking at.
+ */
+export function setCadence(r: Ride, rpm: number | null): void {
+  if (rpm === null || !Number.isFinite(rpm) || rpm < 0 || rpm > MAX_PLAUSIBLE_RPM) {
+    r.cadenceRpm = null;
+    return;
+  }
+  r.cadenceRpm = rpm;
 }
 
 export function setPaused(r: Ride, paused: boolean): void {
@@ -203,6 +226,11 @@ export function advanceRide(r: Ride, frame: FrameInput): void {
   if (r.game !== null && r.game.controls.length > 0 && s.handleKeys !== undefined) {
     s.handleKeys(frame.keys);
   }
+
+  // Cadence is handed over whole, once per frame, ahead of the substeps. It
+  // is not eased and not divided across them: it is a position on a dial the
+  // rider is holding, not a quantity being integrated.
+  s.setCadence?.(r.cadenceRpm);
 
   // Presentation that must not affect the simulation gets real frame time.
   s.animate?.(dt, frame.width, frame.height);

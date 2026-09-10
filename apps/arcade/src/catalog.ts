@@ -9,9 +9,10 @@
 import type { GameModule } from '@paperboy/game-api';
 import { paperboy } from '@paperboy/game-paperboy';
 import { pack } from '@paperboy/game-pack';
+import { spincycle } from '@paperboy/game-spincycle';
 import { velodrome } from '@paperboy/game-velodrome';
 
-export const CATALOG: readonly GameModule[] = [paperboy, pack, velodrome];
+export const CATALOG: readonly GameModule[] = [paperboy, pack, velodrome, spincycle];
 
 export function gameById(id: string): GameModule | null {
   return CATALOG.find((g) => g.id === id) ?? null;
