@@ -1,6 +1,24 @@
 {
   "name": "wattcade",
   "private": true,
+  "description": "Small arcade games you play by pedalling an indoor smart trainer: power and cadence as the controller, FTMS over Web Bluetooth, with a keyboard fallback.",
+  "keywords": [
+    "indoor-cycling",
+    "smart-trainer",
+    "ftms",
+    "web-bluetooth",
+    "cycling",
+    "browser-game"
+  ],
+  "homepage": "https://github.com/ryanchard/wattcade#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryanchard/wattcade.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ryanchard/wattcade/issues"
+  },
+  "license": "MIT",
   "type": "module",
   "workspaces": [
     "packages/*",

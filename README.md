@@ -1,8 +1,12 @@
 # Wattcade
 
-Small arcade games you play by pedalling a real bike trainer. Your power and
-cadence are the controller: the browser reads them over Web Bluetooth, and the
-games read them instead of a gamepad.
+Small arcade games you play by pedalling an indoor smart trainer, in a
+browser, over Web Bluetooth. Your watts and your cadence are the controller:
+the browser reads them off the trainer and the games read them instead of a
+gamepad. If you already own a turbo trainer for Zwift or Rouvy — a Wahoo
+KICKR, a JetBlack, anything that speaks FTMS — this is a little game to play
+around with on it. It is not a training platform and does not try to be: five
+small games, built quickly and barely tuned.
 
 The trainer is an output as well as an input. Each game declares the road it
 wants — a grade, a headwind — and the shell sends that back down to the
@@ -15,11 +19,11 @@ you why it changed.
 on a laptop with no hardware at all. Nothing will push back at you, but
 everything runs.
 
-> **A note on the name.** The repository directory is still called
-> `PaperBoy` and the internal packages are still scoped `@paperboy/*`. That is
-> where this started — one game — and it grew into five. The product is
-> Wattcade. Nothing has been renamed on disk, so the mismatch is expected
-> rather than a mistake.
+> **A note on the name.** The internal packages are still scoped
+> `@paperboy/*`, and a working copy may well sit in a directory called
+> `PaperBoy`. That is where this started — one game — and it grew into five.
+> The product is Wattcade. Nothing has been renamed on disk, so the mismatch
+> is expected rather than a mistake.
 
 ## The games
 
@@ -50,8 +54,9 @@ different facts.
 
 ## What you need
 
-- **A smart trainer that speaks FTMS** (the Bluetooth Fitness Machine
-  Service). Almost everything sold in the last several years does.
+- **An indoor smart trainer that speaks FTMS** (the Bluetooth Fitness Machine
+  Service). Almost every turbo trainer sold in the last several years does —
+  the same machines people ride with Zwift and Rouvy.
 - **Chrome or Edge**, on desktop. Safari and Firefox do not implement Web
   Bluetooth and are not supported — there is no polyfill and no workaround;
   the pairing button simply cannot exist there. On Linux you may also need
@@ -62,15 +67,33 @@ different facts.
   a time. Close Zwift, close the manufacturer's app, and close any other tab
   running Wattcade before you connect.
 
-Developed and tested against a **Wahoo KICKR**. Other FTMS trainers implement
-the same service and should work, but none have been tried — if yours does
-something odd, that is worth an issue.
+### Which trainers work
+
+Wattcade speaks standard FTMS, not any manufacturer's proprietary protocol, so
+any trainer that advertises the Fitness Machine Service should work.
+
+It has been ridden on a **Wahoo KICKR**. That is the only hardware confirmed.
+A **JetBlack** should work and has not been tested — like every other FTMS
+trainer named here, that is a prediction rather than a claim.
+
+Two capabilities decide how much of Wattcade you actually get, and trainers
+differ on both:
+
+- **Cadence.** Some report power and nothing else. Spin Cycle and Fish steer
+  on cadence and are unplayable without it.
+- **Simulation-parameter writes.** Some expose FTMS read-only. Paperboy, The
+  Pack and Velodrome still run, but the resistance is the thing they are
+  about, so a read-only trainer takes most of them away.
+
+If you ride Wattcade on anything that is not a KICKR, an issue saying what
+happened — working or not — is genuinely useful; the most useful version of it
+is a capture from `tools/ble-probe`.
 
 ## Quick start
 
 ```sh
-git clone <this repo>
-cd PaperBoy
+git clone https://github.com/ryanchard/wattcade.git
+cd wattcade
 npm install
 npm run dev
 ```
@@ -232,10 +255,35 @@ as a file, so a downloaded copy is playable on the keyboard. Web Bluetooth
 needs a secure context, so a real trainer still requires the hosted URL or
 `localhost`.
 
+### Repository settings
+
+GitHub's description and topics cannot be set from a file in the repository,
+and they are what its own search reads. Settings → General for the first,
+the gear beside **About** for the second. Suggested, and accurate:
+
+Description:
+
+```
+Small arcade games you play by pedalling an indoor smart trainer — power and cadence as the controller, FTMS over Web Bluetooth, with a keyboard fallback.
+```
+
+Topics:
+
+```
+indoor-cycling, smart-trainer, turbo-trainer, ftms, web-bluetooth,
+bluetooth-low-energy, wahoo-kickr, browser-game, canvas, typescript, exergaming
+```
+
 ## Screenshots
 
 There are none yet. `docs/images/` is where they go when somebody with a
 screen and a pair of legs takes them.
+
+## Trademarks
+
+Wahoo, KICKR, JetBlack, Zwift and Rouvy are trademarks of their respective
+owners, named here only to say what Wattcade connects to and what people
+already ride; there is no affiliation with or endorsement by any of them.
 
 ## Licence
 
