@@ -52,9 +52,14 @@ Before any of the numbers below mean anything, it has to be true that both
 versions are actually playing the same game. Two pieces of evidence say they
 are, and both come from earlier tasks in this project, not from this one:
 
-- **Frame-for-frame parity.** During Task 20's review, both engines were
-  driven for 20,000 frames on the same seed and the same input sequence.
-  Distance difference came out at exactly `0.000e+0`, with every
+- **Frame-for-frame parity — of the shared pure-logic layer specifically,
+  not of everything either engine does.** During Task 20's review, both
+  engines were driven for 20,000 frames on the same seed and the same input
+  sequence, exercising rider physics, block streaming, landing
+  classification, and scoring — the parts that route through
+  `@paperboy/game-core` and `@paperboy/trainer`, or through logic
+  (`stepWorld`/`PaperboyRun.update`) that mirrors it frame-for-frame in both
+  apps. Distance difference came out at exactly `0.000e+0`, with every
   `papersDelivered`/multiplier/streak/score transition matching on every
   single frame (`progress.md`, Task 20 entry). The reviewer's first attempt
   at this harness *did* show drift — about 2.0 m by frame 5000 — and traced
@@ -64,6 +69,22 @@ are, and both come from earlier tasks in this project, not from this one:
   the first frame of a run, so `gradeAt(0)` silently fell back to a flat 0%
   grade for one frame — fixed in Task 20, verified with a bit-exact
   (`toBe`, not `toBeCloseTo`) regression test.
+
+  **What that 20,000-frame run did NOT cover: hazard motion and collision.**
+  Both sat outside the shared layer at the time — each app hand-rolled its
+  own copy of the hazard weave and its own collision check — so a bit-exact
+  match on distance and score says nothing about whether a hazard was in
+  the same place in both engines. It wasn't: a later review (finding 2,
+  `final-fixes-report.md`) found Version B's weave had silently dropped
+  Version A's lateral clamp, putting 136 of 753 moving non-car hazards
+  (18.1%, across 5 seeds x 40 blocks) at a different lateral by up to
+  0.63 m — a real, measurable divergence the 20,000-frame parity claim
+  never touched, precisely because it lived outside what that harness
+  exercised. The weave has since been moved into `@paperboy/game-core`
+  (`hazardPositionAt`) and both apps now call the identical function, so
+  the parity claim is broader today than it was when this document was
+  first written — but that broadening happened after this run, not because
+  of it.
 - **Identical hazard collision thresholds.** Version A originally used one
   flat collision half-depth for every hazard kind, which didn't even match
   its own drawn car sprite. Both engines were swept in 0.0001 m steps to find
@@ -513,11 +534,17 @@ nothing below should be read as a prediction of the answer:
    the art gap, not just unverified.** Ride both on seed `paperboy` through
    the first three blocks and confirm houses land in the same places, the
    same houses are subscribers, the same hazards appear in the same places,
-   and the same throws score the same amount. The shared-layer state
-   driving all four is already known to be bit-exact (see above); what's
-   unverified is whether each engine's *renderer* draws that shared state
-   correctly — a wrong lane, a swapped colour, a depth-sort glitch that only
-   shows up with specific entity overlaps. That check is still meaningful
+   and the same throws score the same amount. The shared pure-logic layer
+   (rider physics, streaming, landing, scoring) is bit-exact by the
+   20,000-frame parity run above, and hazard position is now also shared by
+   construction (`hazardPositionAt` in `@paperboy/game-core`, finding 2 of
+   `final-fixes-report.md`) rather than independently re-derived — but that
+   specific parity run predates the hazard fix and never exercised it, so
+   "hazards appear in the same places" rests on the newer, narrower
+   guarantee, not on the 20,000-frame number. What's unverified either way
+   is whether each engine's *renderer* draws that shared state correctly —
+   a wrong lane, a swapped colour, a depth-sort glitch that only shows up
+   with specific entity overlaps. That check is still meaningful
    for *positions* (does a house/hazard/paper sit where the shared state
    says it should) even with mismatched art, but any comparison of how
    correct-looking or legible the two scenes are is not answerable until
