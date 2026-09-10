@@ -261,6 +261,9 @@ describe('gearLine', () => {
     const line = gearLine(model());
     expect(line).toContain('No controller');
     expect(line).toContain('[ and ]');
+    // Browsers hide a gamepad until one of its buttons is pressed, so this
+    // line is also what a connected-but-untouched pad looks like.
+    expect(line).toContain('press one of its buttons');
   });
 
   it('says where the paddles are once a controller is attached', () => {

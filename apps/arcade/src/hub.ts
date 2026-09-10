@@ -83,8 +83,12 @@ export function padName(id: string | null): string {
 export function gearLine(model: HubModel): string {
   const gear = `Gear ${model.gear} of ${GEAR_MAX}.`;
   if (!model.pad.connected) {
-    return `No controller. ${gear} Shift with [ and ], or plug a controller `
-      + 'in and shift with the shoulder buttons.';
+    // Browsers hide gamepads until one of their buttons is pressed, so "no
+    // controller" is also what a connected-but-untouched pad looks like. Say
+    // so, or a rider reads it as a fault and goes looking for one.
+    return `No controller. ${gear} Shift with [ and ] — or connect a `
+      + 'controller and press one of its buttons, which is what makes a '
+      + 'browser admit it is there, and shift with the shoulder buttons.';
   }
   if (!model.pad.standard) {
     return `${padName(model.pad.name)} connected, but its layout is not one `
