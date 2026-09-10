@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { DEFAULT_RIDER } from '@paperboy/trainer';
 import type { HazardSpec, HouseSpec } from '@paperboy/game-core';
 import { PX_PER_M, project, toBodyX, toBodyY } from '../iso.js';
-import { PaperboyRun } from '../logic/run.js';
+import type { EntityRecord } from '../logic/entities.js';
+import { FIXED_DT, MAX_SUBSTEPS, PaperboyRun } from '../logic/run.js';
 import type { RunInput } from '../logic/run.js';
 import {
   COLOURS, drawHazardView, drawHouseView, drawPaperView, drawRiderView,
@@ -27,6 +28,15 @@ export class StreetScene extends Phaser.Scene {
   #statics = new Map<string, Phaser.GameObjects.Container>();
   #papers = new Map<number, Phaser.GameObjects.Container>();
   #input: RunInput = { steer: 0, throwPaper: false };
+  #steerSource: () => number = () => 0;
+
+  // Fixed-timestep accumulator: see run.update() below. `#pendingThrow`
+  // survives a frame that spends zero substeps (e.g. a burst of very short
+  // frames), rather than being dropped, but is still consumed by exactly one
+  // substep once one finally runs — a keypress spends exactly one paper
+  // regardless of how the accumulator happens to slice frames.
+  #accumulator = 0;
+  #pendingThrow = false;
 
   constructor() {
     super('street');
@@ -40,12 +50,26 @@ export class StreetScene extends Phaser.Scene {
     drawRiderView(riderGraphics);
     this.#rider = this.add.container(0, 0, [riderGraphics]);
 
-    this.#riderZone = this.add.zone(0, 0, 0.8 * PX_PER_M, 1.5 * PX_PER_M);
+    // X is distance (along the road), Y is lateral (across it) — this must
+    // match toBodyX/toBodyY's convention exactly, since Zone(x, y, width,
+    // height) treats `width` as the X extent. The rider is 1.5 m long
+    // (distance) by 0.8 m wide (lateral), matching drawRiderView's box and
+    // Version A's RIDER_HALF_LENGTH/RIDER_HALF_WIDTH.
+    this.#riderZone = this.add.zone(0, 0, 1.5 * PX_PER_M, 0.8 * PX_PER_M);
     this.physics.add.existing(this.#riderZone);
   }
 
   setInput(input: RunInput): void {
     this.#input = input;
+  }
+
+  /**
+   * Steering is read fresh every rendered frame rather than latched from the
+   * 30 Hz trainer-resistance interval, so it feels as responsive as Version
+   * A's per-frame input poll. Throwing stays edge-triggered via setInput.
+   */
+  setSteerSource(source: () => number): void {
+    this.#steerSource = source;
   }
 
   startRun(seed: number): void {
@@ -65,16 +89,44 @@ export class StreetScene extends Phaser.Scene {
     const run = this.run;
     if (run === null || run.gameOver) return;
 
-    const dt = Math.min(0.05, deltaMs / 1000);
-    const { stream } = run.update(dt, this.#input);
+    if (this.#input.throwPaper) this.#pendingThrow = true;
     this.#input = { steer: this.#input.steer, throwPaper: false };
 
-    for (const record of stream.added) {
+    // Physics must not depend on the display's refresh rate (a 144 Hz
+    // monitor must simulate the same game as a 60 Hz one), so the rendered
+    // frame's time is banked into an accumulator and spent in fixed
+    // FIXED_DT substeps — mirroring Version A's advanceFixed. Entity
+    // creation/removal deltas from every substep this frame are collected
+    // and applied once after the loop, so a house or hazard is still
+    // created exactly once per rendered frame no matter how many substeps
+    // ran.
+    const steer = this.#steerSource();
+    const frameDt = Math.min(0.25, deltaMs / 1000);
+    this.#accumulator += frameDt;
+
+    const added: EntityRecord[] = [];
+    const removed: string[] = [];
+    let steps = 0;
+    while (this.#accumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
+      const throwPaper = this.#pendingThrow;
+      this.#pendingThrow = false;
+      const { stream } = run.update(FIXED_DT, { steer, throwPaper });
+      added.push(...stream.added);
+      removed.push(...stream.removed);
+      this.#accumulator -= FIXED_DT;
+      steps += 1;
+    }
+    // A genuine stall (tab backgrounded, debugger paused, ...) should drop
+    // its backlog of substeps rather than replay them all in one burst once
+    // the tab wakes back up.
+    if (steps === MAX_SUBSTEPS) this.#accumulator = 0;
+
+    for (const record of added) {
       if (record.kind === 'hazard') this.#addHazard(record.id, record.spec as HazardSpec);
       else if (record.kind === 'house') this.#addHouse(record.id, record.spec as HouseSpec);
       else this.#addStack(record.id, record.distance, record.lateral);
     }
-    for (const id of stream.removed) {
+    for (const id of removed) {
       const hazard = this.#hazards.get(id);
       if (hazard !== undefined) {
         hazard.container.destroy();
@@ -85,7 +137,7 @@ export class StreetScene extends Phaser.Scene {
       this.#statics.delete(id);
     }
 
-    this.#moveHazards(run);
+    this.#moveHazards(run, frameDt);
     this.#syncPapers(run);
     this.#drawGround(run);
     this.#syncPositions(run);
@@ -129,6 +181,10 @@ export class StreetScene extends Phaser.Scene {
     drawHazardView(g, spec);
     const container = this.add.container(0, 0, [g]);
 
+    // X is distance, Y is lateral (see the rider zone in create()). The
+    // hazard's depth (along the road) is its X extent and spec.width
+    // (across the road) is its Y extent — this one is genuinely right, not
+    // accidentally so.
     const zone = this.add.zone(
       toBodyX(spec.distance),
       toBodyY(spec.lateral),
@@ -144,11 +200,14 @@ export class StreetScene extends Phaser.Scene {
     });
   }
 
-  #moveHazards(run: PaperboyRun): void {
+  #moveHazards(run: PaperboyRun, dt: number): void {
     for (const v of this.#hazards.values()) {
       if (!v.spec.moving) continue;
       if (v.spec.kind === 'car') {
-        v.distance -= v.spec.speed * (this.game.loop.delta / 1000);
+        // Use the scene's own clamped dt, not the raw Phaser loop delta —
+        // otherwise a frame spike would make cars jump relative to
+        // everything else, which is driven by fixed substeps of run time.
+        v.distance -= v.spec.speed * dt;
       } else {
         const t = run.elapsed + v.spec.phase * 10;
         v.lateral = v.spec.lateral + Math.sin(t * 0.8) * 0.8;

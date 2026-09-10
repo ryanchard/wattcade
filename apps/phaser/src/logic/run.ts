@@ -26,6 +26,21 @@ export const GRAVITY = 9.8;
 export const STACK_PICKUP_DISTANCE_M = 1.5;
 export const STACK_PICKUP_LATERAL_M = 1.0;
 
+/**
+ * Physics must not run at the display's refresh rate — a 144 Hz monitor
+ * would otherwise simulate different gameplay from a 60 Hz one. StreetScene
+ * accumulates rendered-frame time and spends it in fixed FIXED_DT substeps,
+ * mirroring Version A's `apps/canvas/src/session.ts` so both engines state
+ * the same constants.
+ */
+export const FIXED_DT = 1 / 120;
+/**
+ * StreetScene clamps a frame to 0.25 s, which at FIXED_DT needs exactly 30
+ * substeps. A lower cap would silently slow the game down whenever a frame
+ * ran long, rather than only when the tab had genuinely stalled.
+ */
+export const MAX_SUBSTEPS = 30;
+
 export interface RunInput {
   steer: number;
   throwPaper: boolean;

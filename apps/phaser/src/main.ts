@@ -54,10 +54,15 @@ window.addEventListener('blur', () => held.clear());
 const readSteer = (): number =>
   (held.has('ArrowLeft') ? -1 : 0) + (held.has('ArrowRight') ? 1 : 0);
 
+// Steering is read once per rendered frame from inside StreetScene.update(),
+// not latched from this 30 Hz interval — that would quantise it to ~33 ms
+// steps, unlike Version A's per-frame input poll. Throwing stays edge-
+// triggered via the keydown handler above.
+street.setSteerSource(readSteer);
+
 setInterval(() => {
   const run = street.run;
   if (run === null) return;
-  street.setInput({ steer: readSteer(), throwPaper: false });
   // Exactly one setSimulation per tick, and it must be the last word: the
   // writer coalesces to the newest value, so an earlier zero would be lost.
   source?.setSimulation(run.effectiveSimulation());
@@ -146,7 +151,7 @@ function endRun(): void {
 }
 
 window.addEventListener('beforeunload', () => {
-  source?.setSimulation({ grade: 0, headwind: 0, crr: 0.004, cw: 0.51 });
+  source?.setSimulation(FLAT_SIMULATION);
   void source?.stop();
 });
 
