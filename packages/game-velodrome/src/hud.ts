@@ -1,13 +1,16 @@
 import { DISPLAY_FONT, INK, KIT, LABEL_FONT, PALETTE } from './palette.js';
-import { RACE_LAPS, lapNumber, metresRemaining } from './race.js';
+import { metresRemaining } from './race.js';
 import type { RaceState } from './race.js';
 import { drawTrackMap } from './render.js';
 import { drawTabular } from './text.js';
 
 /**
- * The numbers ARE the typography here: laps, gap, watts. Heavy, condensed,
+ * The numbers ARE the typography here: watts, distance, gap. Heavy, condensed,
  * and laid out on fixed digit slots so nothing jitters as it changes. Big
  * enough to read while breathing hard. Everything else stays quiet.
+ *
+ * The lap count is not here — it lives in the middle of the oval, top right,
+ * where the loop already says where you are on it. One lap counter, not two.
  *
  * There is deliberately no draft indicator. Whether the rider is sheltered is
  * told by the air on the boards and by the trainer under them; adding a badge
@@ -51,21 +54,14 @@ export function drawHud(
   c.fillStyle = INK.textFaint;
   c.fillRect(unit * 2 + barW / 1.6, barY - unit * 0.25, 1.5, unit);
 
-  // --- laps, top centre.
-  const lap = lapNumber(s.player.distance);
+  // --- what is left of the race, top centre.
+  const toGo = Math.round(metresRemaining(s.player.distance));
   c.fillStyle = INK.text;
   drawTabular(
-    c, `${lap}/${RACE_LAPS}`, w / 2, unit * 7.2,
+    c, String(toGo), w / 2, unit * 7.2,
     `800 ${unit * 6}px ${DISPLAY_FONT}`, 'center',
   );
-  label(c, 'lap', w / 2, unit * 9, 'center');
-
-  const toGo = Math.round(metresRemaining(s.player.distance));
-  c.fillStyle = INK.textDim;
-  drawTabular(
-    c, `${toGo} m to go`, w / 2, unit * 11,
-    `600 ${unit * 2}px ${DISPLAY_FONT}`, 'center',
-  );
+  label(c, 'metres to go', w / 2, unit * 9, 'center');
 
   // --- the gap, bottom centre. Big, signed, and always in the same place.
   const gap = s.gap;
@@ -104,9 +100,11 @@ export function drawHud(
   c.fillStyle = KIT.rivalAccent;
   c.fillRect(w - unit * 2, h - unit * 3.6, unit * 0.4, unit * 0.4);
 
-  // --- the oval, top right.
-  drawTrackMap(c, s, w - unit * 2 - unit * 16, unit * 4, unit * 16);
-  label(c, 'the loop', w - unit * 2, unit * 3, 'right', INK.textFaint);
+  // --- the oval, top right. Big enough to take in without looking away for
+  // long, because it is the only thing that says this is a velodrome and not
+  // a road, and it carries the lap.
+  const map = Math.min(unit * 22, w * 0.30);
+  drawTrackMap(c, s, w - unit * 2 - map, unit * 2.4, map);
 
   c.restore();
 }

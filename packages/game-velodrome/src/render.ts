@@ -1,6 +1,6 @@
-import { DISPLAY_FONT, INK, KIT, PALETTE } from './palette.js';
+import { DISPLAY_FONT, INK, KIT, LABEL_FONT, PALETTE } from './palette.js';
 import {
-  LAP_LENGTH_M, RACE_DISTANCE_M, lapPhase,
+  LAP_LENGTH_M, RACE_DISTANCE_M, RACE_LAPS, lapNumber, lapPhase,
 } from './race.js';
 import type { RaceState } from './race.js';
 import { drawTabular } from './text.js';
@@ -8,7 +8,7 @@ import { drawTabular } from './text.js';
 /**
  * The velodrome, side-on, riders travelling right.
  *
- * Two rules govern everything here.
+ * Three rules govern everything here.
  *
  * 1. THE GAP IS LITERAL SCREEN DISTANCE, and SPEED IS LITERAL SCREEN SPEED.
  *    The rival's position on screen is the gap, to scale, and the boards go
@@ -24,7 +24,9 @@ import { drawTabular } from './text.js';
  *    the cw the app is sending the trainer at the same instant, so the
  *    picture, the physics and the legs all say the same thing.
  *
- * Everything else stays disciplined around those two.
+ * 3. IT IS AN OVAL. The far banking bends away at both ends of the frame, the
+ *    near banking rises into the turns with it, and both riders lean where
+ *    the lap says they are in a bend. You are in a bowl, not beside a road.
  */
 
 // --- camera ---------------------------------------------------------------
@@ -54,7 +56,11 @@ const SCALE_TAU_S = 0.7;
  */
 export const SCROLL_PX_PER_M = PX_PER_M_MAX;
 
-/** Scroll wraps here, far enough out that the wrap is never in shot. */
+/**
+ * Scroll wraps here. Chosen as a common multiple of every layer's period
+ * (near seams 32, far seams 24 at half parallax, light pools 420 at 0.2), so
+ * the wrap is invisible instead of a jump every few seconds.
+ */
 const SCROLL_WRAP = 16800;
 
 /** The player sits here across the screen and stays there. A rider breathing
@@ -86,9 +92,21 @@ interface Streak {
   vx: number;
 }
 
+/** Gradients that depend only on the canvas size. Rebuilt when it changes,
+ * never per frame and never per entity. */
+interface Scenery {
+  w: number;
+  h: number;
+  sky: CanvasGradient;
+  cone: CanvasGradient;
+  wood: CanvasGradient;
+  pool: CanvasGradient;
+  vignette: CanvasGradient;
+}
+
 export interface RenderState {
   scale: number;
-  /** Board-seam scroll, in pixels, wrapped. */
+  /** Board-seam scroll, in pixels of ground travelled, wrapped. */
   scroll: number;
   /** Wheel rotation, radians. */
   wheelPhase: number;
@@ -99,6 +117,7 @@ export interface RenderState {
   /** Eased 0..1 "how hard this looks", drives the rider's posture. */
   strain: number;
   elapsed: number;
+  scenery: Scenery | null;
 }
 
 export function createRenderState(): RenderState {
@@ -111,6 +130,7 @@ export function createRenderState(): RenderState {
     spawnCarry: 0,
     strain: 0,
     elapsed: 0,
+    scenery: null,
   };
 }
 
@@ -147,8 +167,8 @@ export function updateRenderState(
     r.spawnCarry += STREAK_RATE * speed * dt;
     while (r.spawnCarry >= 1) {
       r.spawnCarry -= 1;
-      const bandTop = height * 0.42;
-      const bandBottom = height * 0.86;
+      const bandTop = height * 0.40;
+      const bandBottom = height * 0.88;
       const y = bandTop + Math.random() * (bandBottom - bandTop);
       r.streaks.push({
         x: width * (0.35 + Math.random() * 0.75),
@@ -174,15 +194,19 @@ export function updateRenderState(
   }
 }
 
-// --- the track ------------------------------------------------------------
+// --- the shape of the bowl ------------------------------------------------
 
 /** Vertical layout of the bowl, as fractions of the canvas height. */
 const L = {
-  roof: 0.00,
-  farTopMin: 0.22,   // far banking's outer edge at the ends of the oval
-  farTopMax: 0.36,   // ...and directly across from the camera
-  farHeight: 0.115,
-  railTop: 0.485,    // top of the near banking (the rail)
+  /** Far banking's outer rail at the ends of the oval (the turns)... */
+  farTopMin: 0.165,
+  /** ...and directly across from the camera (the far straight). */
+  farTopMax: 0.375,
+  /** The far banking's face: nearly edge-on across the straight, and much
+   * deeper at the turns, where you are looking into the bowl. */
+  farHeightMin: 0.095,
+  farHeightMax: 0.205,
+  railTop: 0.485,
   boardsTop: 0.505,
   stayers: 0.665,
   ridersY: 0.795,
@@ -190,24 +214,134 @@ const L = {
   measurement: 0.862,
   coteTop: 0.876,
   coteBottom: 0.916,
+  /** How far the near track climbs as it turns away at the frame's ends. */
+  nearLift: 0.055,
 } as const;
 
-function farTopAt(x: number, width: number, height: number): number {
-  // Low in the middle (the far straight, directly across), rising at both
-  // ends (the turns, curving away). This is what restores the oval to a
-  // side-on view before the track map ever gets involved.
-  const k = Math.abs(Math.cos((Math.PI * x) / Math.max(1, width)));
+/**
+ * 0 in the middle of the frame, 1 at both ends: how far into a turn the track
+ * is at this screen position. Raised to a power so the straights stay flat
+ * and the bend happens where a bend happens — at the ends.
+ */
+function turnK(x: number, width: number): number {
+  const c = Math.abs(Math.cos((Math.PI * x) / Math.max(1, width)));
+  return c * c * Math.sqrt(c); // c^2.5, cheaper than Math.pow
+}
+
+/** The far banking's outer rail: low across the straight, climbing hard at
+ * both ends where the oval turns away from the camera. */
+export function farTopAt(x: number, width: number, height: number): number {
+  const k = turnK(x, width);
   return height * (L.farTopMax - (L.farTopMax - L.farTopMin) * k);
 }
 
-function drawRoof(
-  c: CanvasRenderingContext2D, w: number, h: number, r: RenderState,
+/** The far banking's visible face. Deeper at the turns. */
+function farHeightAt(x: number, width: number, height: number): number {
+  const k = turnK(x, width);
+  return height * (L.farHeightMin + (L.farHeightMax - L.farHeightMin) * k);
+}
+
+/** Where a point on the near banking sits. `t` runs 0 at the top of the
+ * boards to 1 at the cote d'azur, and may run outside that for the rail
+ * above and the apron below. The band lifts and narrows into the turns. */
+function nearY(x: number, t: number, width: number, height: number): number {
+  const base = height * (L.boardsTop + (L.coteTop - L.boardsTop) * t);
+  return base - height * L.nearLift * turnK(x, width) * (0.3 + 0.7 * t);
+}
+
+/** Convert one of L's absolute height fractions to a near-band `t`. */
+function tAt(fraction: number): number {
+  return (fraction - L.boardsTop) / (L.coteTop - L.boardsTop);
+}
+
+const T_RAIL = tAt(L.railTop);
+const T_STAYERS = tAt(L.stayers);
+const T_RIDERS = tAt(L.ridersY);
+const T_SPRINT = tAt(L.sprint);
+const T_MEASUREMENT = tAt(L.measurement);
+const T_APRON = tAt(L.coteBottom);
+
+/** Steps across the frame for every curved edge. Enough to read as a curve,
+ * few enough to be free. */
+const CURVE_STEPS = 32;
+
+function curve(
+  c: CanvasRenderingContext2D, w: number,
+  yAt: (x: number) => number, reverse = false,
 ): void {
-  // Dark arena above the bowl, with the overhead rigs burning into it.
+  for (let i = 0; i <= CURVE_STEPS; i++) {
+    const x = (w / CURVE_STEPS) * (reverse ? CURVE_STEPS - i : i);
+    const y = yAt(x);
+    if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
+  }
+}
+
+/**
+ * How hard a rider is leaning, -1..1, from where they are round the lap.
+ * Zero on the two straights, full through the two bends — and opposite signs
+ * in the two bends, because seen from the side the ends of an oval tip away
+ * from each other. Pure, so the lean is the same every time you ride it.
+ */
+export function leanFor(phase: number): number {
+  const s = Math.sin(2 * Math.PI * phase);
+  return s * s * s;
+}
+
+/** Radians at full bend. Enough to read; not enough to look like a crash. */
+const LEAN_MAX = 0.14;
+
+// --- scenery --------------------------------------------------------------
+
+/** Pools of overhead light on the boards, in screen pixels. */
+const POOL_SPACING = 420;
+const POOL_PARALLAX = 0.2;
+const POOL_RADIUS = 260;
+const NEAR_SEAM_PX = 32;
+const FAR_SEAM_PX = 24;
+const FAR_PARALLAX = 0.5;
+
+function scenery(c: CanvasRenderingContext2D, r: RenderState, w: number, h: number): Scenery {
+  const cached = r.scenery;
+  if (cached !== null && cached.w === w && cached.h === h) return cached;
+
   const sky = c.createLinearGradient(0, 0, 0, h * 0.4);
   sky.addColorStop(0, INK.arenaDeep);
   sky.addColorStop(1, PALETTE.arena);
-  c.fillStyle = sky;
+
+  // Built at the origin and moved into place with translate(), so five light
+  // rigs and five light pools cost two gradients rather than ten a frame.
+  const cone = c.createRadialGradient(0, 0, 0, 0, 0, h * 0.55);
+  cone.addColorStop(0, 'rgba(255, 244, 220, 0.16)');
+  cone.addColorStop(0.55, 'rgba(255, 244, 220, 0.055)');
+  cone.addColorStop(1, 'rgba(255, 244, 220, 0)');
+
+  const wood = c.createLinearGradient(0, h * (L.boardsTop - L.nearLift), 0, h * L.coteTop);
+  wood.addColorStop(0, PALETTE.boardsShadow);
+  wood.addColorStop(0.30, PALETTE.boards);
+  wood.addColorStop(0.72, PALETTE.boards);
+  wood.addColorStop(1, PALETTE.boardsShadow);
+
+  const pool = c.createRadialGradient(0, 0, 0, 0, 0, POOL_RADIUS);
+  pool.addColorStop(0, 'rgba(255, 244, 220, 0.20)');
+  pool.addColorStop(0.6, 'rgba(255, 244, 220, 0.06)');
+  pool.addColorStop(1, 'rgba(255, 244, 220, 0)');
+
+  const vignette = c.createRadialGradient(
+    w * 0.45, h * 0.62, h * 0.25, w * 0.45, h * 0.62, h * 1.1,
+  );
+  vignette.addColorStop(0, 'rgba(7, 11, 14, 0)');
+  vignette.addColorStop(1, 'rgba(7, 11, 14, 0.55)');
+
+  const built: Scenery = { w, h, sky, cone, wood, pool, vignette };
+  r.scenery = built;
+  return built;
+}
+
+function drawRoof(
+  c: CanvasRenderingContext2D, w: number, h: number, sc: Scenery,
+): void {
+  // Dark arena above the bowl, with the overhead rigs burning into it.
+  c.fillStyle = sc.sky;
   c.fillRect(0, 0, w, h * 0.45);
 
   // Trusses.
@@ -237,37 +371,28 @@ function drawRoof(
     c.fill();
     c.globalAlpha = 1;
 
-    const cone = c.createRadialGradient(x, y, 0, x, y, h * 0.55);
-    cone.addColorStop(0, 'rgba(255, 244, 220, 0.13)');
-    cone.addColorStop(0.55, 'rgba(255, 244, 220, 0.05)');
-    cone.addColorStop(1, 'rgba(255, 244, 220, 0)');
-    c.fillStyle = cone;
+    c.save();
+    c.translate(x, y);
+    c.fillStyle = sc.cone;
     c.beginPath();
-    c.moveTo(x, y);
-    c.lineTo(x - w * 0.16, h);
-    c.lineTo(x + w * 0.16, h);
+    c.moveTo(0, 0);
+    c.lineTo(-w * 0.16, h);
+    c.lineTo(w * 0.16, h);
     c.closePath();
     c.fill();
+    c.restore();
   }
-  void r;
 }
 
 function drawFarSide(
   c: CanvasRenderingContext2D, w: number, h: number, r: RenderState,
 ): void {
-  const steps = 48;
-  const height = h * L.farHeight;
+  const top = (x: number): number => farTopAt(x, w, h);
+  const bottom = (x: number): number => farTopAt(x, w, h) + farHeightAt(x, w, h);
 
   c.beginPath();
-  c.moveTo(0, farTopAt(0, w, h));
-  for (let i = 1; i <= steps; i++) {
-    const x = (w / steps) * i;
-    c.lineTo(x, farTopAt(x, w, h));
-  }
-  for (let i = steps; i >= 0; i--) {
-    const x = (w / steps) * i;
-    c.lineTo(x, farTopAt(x, w, h) + height);
-  }
+  curve(c, w, top);
+  curve(c, w, bottom, true);
   c.closePath();
   c.fillStyle = PALETTE.boardsShadow;
   c.fill();
@@ -278,96 +403,108 @@ function drawFarSide(
   c.clip();
   c.strokeStyle = INK.seam;
   c.lineWidth = 1;
-  const spacing = 26;
-  const off = (-r.scroll * 0.35) % spacing;
-  for (let x = off - spacing; x < w + spacing; x += spacing) {
+  const off = (r.scroll * FAR_PARALLAX) % FAR_SEAM_PX;
+  for (let x = off - FAR_SEAM_PX; x < w + FAR_SEAM_PX; x += FAR_SEAM_PX) {
     c.beginPath();
     c.moveTo(x, 0);
     c.lineTo(x + 6, h);
     c.stroke();
   }
+  // The overhead rigs catch the far banking's face where it turns toward us.
+  c.fillStyle = 'rgba(255, 244, 220, 0.05)';
+  c.beginPath();
+  curve(c, w, top);
+  curve(c, w, (x) => top(x) + farHeightAt(x, w, h) * 0.45, true);
+  c.closePath();
+  c.fill();
   c.restore();
 
   // The cote d'azur on the far side's inner edge, and the rail above it.
   c.lineWidth = Math.max(2, h * 0.006);
   c.strokeStyle = PALETTE.cote;
   c.beginPath();
-  for (let i = 0; i <= steps; i++) {
-    const x = (w / steps) * i;
-    const y = farTopAt(x, w, h) + height;
-    if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
-  }
+  curve(c, w, bottom);
   c.stroke();
 
-  c.lineWidth = 2;
-  c.strokeStyle = INK.rail;
+  // The fence around the top of the banking. Its curve is the oval's
+  // silhouette, so it is a band rather than a hairline.
+  c.fillStyle = INK.rail;
   c.beginPath();
-  for (let i = 0; i <= steps; i++) {
-    const x = (w / steps) * i;
-    const y = farTopAt(x, w, h) - 3;
-    if (i === 0) c.moveTo(x, y); else c.lineTo(x, y);
-  }
-  c.stroke();
+  curve(c, w, (x) => top(x) - h * 0.014);
+  curve(c, w, (x) => top(x) - 1, true);
+  c.closePath();
+  c.fill();
+
+  // A shadow under the far banking, so the bowl has a floor to sit in.
+  c.fillStyle = 'rgba(7, 11, 14, 0.45)';
+  c.beginPath();
+  curve(c, w, bottom);
+  curve(c, w, (x) => bottom(x) + h * 0.03, true);
+  c.closePath();
+  c.fill();
 }
 
 function drawNearTrack(
   c: CanvasRenderingContext2D, w: number, h: number,
-  r: RenderState, s: RaceState,
+  r: RenderState, s: RaceState, sc: Scenery,
 ): void {
-  const top = h * L.boardsTop;
-  const bottom = h * L.coteTop;
+  const at = (x: number, t: number): number => nearY(x, t, w, h);
 
-  // The boards. Warm honey where the rigs land, unlit between.
-  const wood = c.createLinearGradient(0, top, 0, bottom);
-  wood.addColorStop(0, PALETTE.boardsShadow);
-  wood.addColorStop(0.35, PALETTE.boards);
-  wood.addColorStop(1, PALETTE.boardsShadow);
-  c.fillStyle = wood;
-  c.fillRect(0, top, w, bottom - top);
+  // The boards, curving up into the turn at both ends of the frame.
+  c.beginPath();
+  curve(c, w, (x) => at(x, 0));
+  curve(c, w, (x) => at(x, 1), true);
+  c.closePath();
 
   c.save();
-  c.beginPath();
-  c.rect(0, top, w, bottom - top);
   c.clip();
+  c.fillStyle = sc.wood;
+  c.fillRect(0, h * (L.boardsTop - L.nearLift) - 4, w, h * (L.coteTop - L.boardsTop + L.nearLift) + 8);
 
-  // Board seams, fanning slightly with the banking so the surface reads as a
-  // curved wall rather than a stripe.
+  // Board seams, fanning with the banking so the surface reads as a curved
+  // wall rather than a stripe. These are what the speed is read from.
   c.strokeStyle = INK.seam;
   c.lineWidth = 1.2;
-  const spacing = 34;
-  const off = (-r.scroll) % spacing;
-  for (let x = off - spacing * 2; x < w + spacing * 2; x += spacing) {
+  const off = (-r.scroll) % NEAR_SEAM_PX;
+  for (let x = off - NEAR_SEAM_PX * 2; x < w + NEAR_SEAM_PX * 2; x += NEAR_SEAM_PX) {
     c.beginPath();
-    c.moveTo(x, top);
-    c.lineTo(x + 22, bottom);
+    c.moveTo(x, at(x, 0));
+    c.lineTo(x + 22, at(x + 22, 1));
+    c.stroke();
+  }
+
+  // The planks themselves run the way the riders do, so they do not scroll.
+  // Between them and the seams the boards read as timber.
+  c.strokeStyle = 'rgba(78, 52, 26, 0.22)';
+  c.lineWidth = 1;
+  for (let i = 1; i < 8; i++) {
+    c.beginPath();
+    curve(c, w, (x) => at(x, i / 8));
     c.stroke();
   }
 
   // Pooled light, moving with the boards.
-  for (let i = 0; i < 5; i++) {
-    const px = ((w / 5) * (i + 0.5) - r.scroll * 0.15 + w * 3) % (w + 400) - 200;
-    const pool = c.createRadialGradient(
-      px, top + (bottom - top) * 0.45, 0,
-      px, top + (bottom - top) * 0.45, w * 0.13,
-    );
-    pool.addColorStop(0, 'rgba(255, 244, 220, 0.16)');
-    pool.addColorStop(1, 'rgba(255, 244, 220, 0)');
-    c.fillStyle = pool;
-    c.fillRect(px - w * 0.14, top, w * 0.28, bottom - top);
+  c.fillStyle = sc.pool;
+  const drift = (r.scroll * POOL_PARALLAX) % POOL_SPACING;
+  for (let i = -1; i * POOL_SPACING - drift < w + POOL_SPACING; i++) {
+    const px = i * POOL_SPACING - drift;
+    c.save();
+    c.translate(px, at(px, 0.45));
+    c.fillRect(-POOL_RADIUS, -POOL_RADIUS, POOL_RADIUS * 2, POOL_RADIUS * 2);
+    c.restore();
   }
 
   // The painted lines. A track has exactly these and no others.
-  const line = (yf: number, colour: string, width: number): void => {
+  const line = (t: number, colour: string, width: number): void => {
     c.strokeStyle = colour;
     c.lineWidth = width;
     c.beginPath();
-    c.moveTo(0, h * yf);
-    c.lineTo(w, h * yf);
+    curve(c, w, (x) => at(x, t));
     c.stroke();
   };
-  line(L.stayers, INK.paint, Math.max(1.5, h * 0.0035));
-  line(L.sprint, PALETTE.sprintLine, Math.max(2, h * 0.005));
-  line(L.measurement, INK.measurement, Math.max(2, h * 0.0055));
+  line(T_STAYERS, INK.paint, Math.max(1.5, h * 0.0035));
+  line(T_SPRINT, PALETTE.sprintLine, Math.max(2, h * 0.005));
+  line(T_MEASUREMENT, INK.measurement, Math.max(2, h * 0.0055));
 
   // The finish line, at its real place on the lap, sweeping past once every
   // 250 m. The lap counter turning over is not the only thing that says so.
@@ -377,28 +514,59 @@ function drawNearTrack(
   for (const d of [metresToLine - LAP_LENGTH_M, metresToLine]) {
     const x = anchor + d * r.scale;
     if (x < -60 || x > w + 60) continue;
-    c.fillStyle = INK.paint;
     const lw = Math.max(3, r.scale * 0.35);
-    c.fillRect(x, top, lw, bottom - top);
+    // Skewed with the boards, so it lies on the surface.
+    const skew = 22;
+    c.fillStyle = INK.paint;
+    c.beginPath();
+    c.moveTo(x, at(x, 0));
+    c.lineTo(x + lw, at(x + lw, 0));
+    c.lineTo(x + skew + lw, at(x + skew + lw, 1));
+    c.lineTo(x + skew, at(x + skew, 1));
+    c.closePath();
+    c.fill();
     // The chequer of the pursuit line.
     c.fillStyle = 'rgba(14, 20, 24, 0.75)';
     for (let k = 0; k < 10; k += 2) {
-      const yy = top + ((bottom - top) / 10) * k;
-      c.fillRect(x, yy, lw, (bottom - top) / 10);
+      const t0 = k / 10;
+      const t1 = (k + 1) / 10;
+      const x0 = x + skew * t0;
+      const x1 = x + skew * t1;
+      c.beginPath();
+      c.moveTo(x0, at(x0, t0));
+      c.lineTo(x0 + lw, at(x0 + lw, t0));
+      c.lineTo(x1 + lw, at(x1 + lw, t1));
+      c.lineTo(x1, at(x1, t1));
+      c.closePath();
+      c.fill();
     }
   }
 
   c.restore();
 
-  // Rail at the top of the banking.
+  // Rail at the top of the banking, curving with it.
   c.fillStyle = INK.rail;
-  c.fillRect(0, h * L.railTop, w, h * (L.boardsTop - L.railTop));
+  c.beginPath();
+  curve(c, w, (x) => at(x, T_RAIL));
+  curve(c, w, (x) => at(x, 0) + 1, true);
+  c.closePath();
+  c.fill();
 
   // Cote d'azur, then the infield floor.
   c.fillStyle = PALETTE.cote;
-  c.fillRect(0, h * L.coteTop, w, h * (L.coteBottom - L.coteTop));
+  c.beginPath();
+  curve(c, w, (x) => at(x, 1));
+  curve(c, w, (x) => at(x, T_APRON), true);
+  c.closePath();
+  c.fill();
+
   c.fillStyle = PALETTE.arena;
-  c.fillRect(0, h * L.coteBottom, w, h * (1 - L.coteBottom) + 2);
+  c.beginPath();
+  curve(c, w, (x) => at(x, T_APRON) - 1);
+  c.lineTo(w, h + 2);
+  c.lineTo(0, h + 2);
+  c.closePath();
+  c.fill();
 }
 
 // --- riders ---------------------------------------------------------------
@@ -411,14 +579,23 @@ interface Kit {
 /**
  * One rider, side-on, travelling right. `strain` is 0..1: at 0 they sit up
  * in the shelter and barely move; at 1 they are deep in the bars and rocking.
+ * `lean` is radians — they are in a bend, and the boards are holding them up.
  */
 function drawRider(
   c: CanvasRenderingContext2D,
   x: number, y: number, scale: number,
-  kit: Kit, r: RenderState, strain: number, sheltered: boolean,
+  kit: Kit, r: RenderState, strain: number, sheltered: boolean, lean: number,
 ): void {
   const u = scale; // one metre
   const wheelR = WHEEL_RADIUS_M * u;
+
+  // Shadow on the boards. Drawn before the lean, because the shadow stays
+  // flat on the surface — it is what anchors the rider to the track.
+  c.fillStyle = 'rgba(14, 20, 24, 0.34)';
+  c.beginPath();
+  c.ellipse(x + lean * u * 0.8, y + wheelR * 0.18, u * 1.0, u * 0.11, 0, 0, Math.PI * 2);
+  c.fill();
+
   if (wheelR < 1.2) {
     // Far enough away to be a mark on the boards rather than a bicycle.
     c.fillStyle = kit.accent;
@@ -431,12 +608,7 @@ function drawRider(
 
   c.save();
   c.translate(x, y);
-
-  // Shadow on the boards.
-  c.fillStyle = 'rgba(14, 20, 24, 0.28)';
-  c.beginPath();
-  c.ellipse(0, wheelR * 0.18, u * 0.95, u * 0.10, 0, 0, Math.PI * 2);
-  c.fill();
+  c.rotate(lean);
 
   const rearX = -0.52 * u;
   const frontX = 0.52 * u;
@@ -547,16 +719,17 @@ export function renderScene(
   c: CanvasRenderingContext2D, s: RaceState, r: RenderState,
   w: number, h: number,
 ): void {
+  const sc = scenery(c, r, w, h);
+
   c.fillStyle = PALETTE.arena;
   c.fillRect(0, 0, w, h);
 
-  drawRoof(c, w, h, r);
+  drawRoof(c, w, h, sc);
   drawFarSide(c, w, h, r);
-  drawNearTrack(c, w, h, r, s);
+  drawNearTrack(c, w, h, r, s, sc);
 
   const anchor = w * PLAYER_ANCHOR;
   const rivalX = anchor - s.gap * r.scale;
-  const y = h * L.ridersY;
 
   // Air BEHIND the riders, so the rider is inside the weather rather than
   // pasted on top of it.
@@ -571,25 +744,31 @@ export function renderScene(
   const clampedRivalX = Math.max(margin, Math.min(w - margin, rivalX));
   const offFrame = rivalX < margin || rivalX > w - margin;
 
+  const rider = (x: number, kit: Kit, strain: number, sheltered: boolean, distance: number): void => {
+    drawRider(
+      c, x, nearY(x, T_RIDERS, w, h), r.scale, kit, r, strain, sheltered,
+      LEAN_MAX * leanFor(lapPhase(distance)),
+    );
+  };
+
   if (rivalX < anchor) {
-    if (!offFrame) {
-      drawRider(c, clampedRivalX, y, r.scale, rivalKit, r, rivalStrain, s.rival.drafting);
-    }
-    drawRider(c, anchor, y, r.scale, playerKit, r, r.strain, s.player.drafting);
+    if (!offFrame) rider(clampedRivalX, rivalKit, rivalStrain, s.rival.drafting, s.rival.distance);
+    rider(anchor, playerKit, r.strain, s.player.drafting, s.player.distance);
   } else {
-    drawRider(c, anchor, y, r.scale, playerKit, r, r.strain, s.player.drafting);
-    if (!offFrame) {
-      drawRider(c, clampedRivalX, y, r.scale, rivalKit, r, rivalStrain, s.rival.drafting);
-    }
+    rider(anchor, playerKit, r.strain, s.player.drafting, s.player.distance);
+    if (!offFrame) rider(clampedRivalX, rivalKit, rivalStrain, s.rival.drafting, s.rival.distance);
   }
 
   drawStreaks(c, r, 1);
 
   // Out of frame is not a reason to shrink the world. Pin them to the edge
   // and say, in metres, how far past it they are.
-  if (offFrame) drawEdgeMarker(c, s.gap, rivalX > anchor, w, y);
+  if (offFrame) {
+    drawEdgeMarker(c, s.gap, rivalX > anchor, w, nearY(clampedRivalX, T_RIDERS, w, h));
+  }
 
-  drawVignette(c, w, h);
+  c.fillStyle = sc.vignette;
+  c.fillRect(0, 0, w, h);
 }
 
 /**
@@ -647,16 +826,6 @@ function drawStreaks(c: CanvasRenderingContext2D, r: RenderState, layer: number)
   c.restore();
 }
 
-function drawVignette(c: CanvasRenderingContext2D, w: number, h: number): void {
-  const v = c.createRadialGradient(
-    w * 0.45, h * 0.62, h * 0.25, w * 0.45, h * 0.62, h * 1.1,
-  );
-  v.addColorStop(0, 'rgba(7, 11, 14, 0)');
-  v.addColorStop(1, 'rgba(7, 11, 14, 0.55)');
-  c.fillStyle = v;
-  c.fillRect(0, 0, w, h);
-}
-
 // --- the oval track map ---------------------------------------------------
 
 /**
@@ -690,55 +859,107 @@ export function pointOnOval(
   return { x: cx - straight / 2 + Math.cos(a) * r, y: cy + Math.sin(a) * r };
 }
 
+function ovalPath(
+  c: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number,
+): void {
+  c.beginPath();
+  for (let i = 0; i <= 72; i++) {
+    const p = pointOnOval(i / 72, cx, cy, rx, ry);
+    if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y);
+  }
+  c.closePath();
+}
+
+/**
+ * The loop, and the lap, as one instrument. The oval is the shape of the
+ * place — two straights, two turns — with both riders on it as dots and the
+ * lap count sitting in the infield where there is nothing else to look at.
+ * Sized to be read at a glance by somebody breathing hard.
+ */
 export function drawTrackMap(
   c: CanvasRenderingContext2D, s: RaceState, x: number, y: number, size: number,
 ): void {
   const rx = size / 2;
-  const ry = size / 3.4;
+  const ry = size / 3.1;
   const cx = x + rx;
   const cy = y + ry;
+  const band = Math.max(8, size * 0.075);
 
   c.save();
-  // The loop itself.
-  c.strokeStyle = 'rgba(201, 154, 94, 0.35)';
-  c.lineWidth = Math.max(5, size * 0.055);
-  c.beginPath();
-  for (let i = 0; i <= 96; i++) {
-    const p = pointOnOval(i / 96, cx, cy, rx, ry);
-    if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y);
-  }
-  c.closePath();
+
+  // The banking: a board-coloured band with a dark core, so it reads as a
+  // track and not as a line drawing.
+  c.lineCap = 'butt';
+  c.strokeStyle = 'rgba(14, 20, 24, 0.55)';
+  c.lineWidth = band + 4;
+  ovalPath(c, cx, cy, rx, ry);
   c.stroke();
+
+  c.strokeStyle = PALETTE.boards;
+  c.lineWidth = band;
+  c.globalAlpha = 0.85;
+  ovalPath(c, cx, cy, rx, ry);
+  c.stroke();
+  c.globalAlpha = 1;
 
   // The cote d'azur, inside the loop.
-  c.strokeStyle = 'rgba(46, 127, 168, 0.5)';
-  c.lineWidth = 1.5;
-  c.beginPath();
-  for (let i = 0; i <= 96; i++) {
-    const p = pointOnOval(i / 96, cx, cy, rx * 0.9, ry * 0.86);
-    if (i === 0) c.moveTo(p.x, p.y); else c.lineTo(p.x, p.y);
-  }
-  c.closePath();
+  c.strokeStyle = PALETTE.cote;
+  c.lineWidth = Math.max(2, band * 0.22);
+  ovalPath(c, cx, cy, rx - band * 0.62, ry - band * 0.62);
   c.stroke();
 
-  // The finish line, at the end of the bottom straight.
+  // The finish line, at the end of the bottom straight, across the band.
   const fin = pointOnOval(0, cx, cy, rx, ry);
-  c.strokeStyle = PALETTE.sprintLine;
-  c.lineWidth = 2;
+  c.strokeStyle = INK.text;
+  c.lineWidth = Math.max(2.5, size * 0.016);
   c.beginPath();
-  c.moveTo(fin.x, fin.y - size * 0.035);
-  c.lineTo(fin.x, fin.y + size * 0.035);
+  c.moveTo(fin.x, fin.y - band * 0.7);
+  c.lineTo(fin.x, fin.y + band * 0.7);
   c.stroke();
 
+  // The lap, in the infield. It is the only number here, so it can be big.
+  const lap = lapNumber(s.player.distance);
+  // A new lap lands with weight: the count flares for the first few metres
+  // of it. Derived from distance, so it is the same every ride.
+  const intoLap = s.player.distance % LAP_LENGTH_M;
+  const flare = Math.max(0, 1 - intoLap / 10);
+  c.textAlign = 'left';
+  c.textBaseline = 'alphabetic';
+  c.fillStyle = INK.text;
+  const lapFont = `800 ${size * 0.30}px ${DISPLAY_FONT}`;
+  const gap = drawTabular(c, `${lap}`, cx, cy + size * 0.075, lapFont, 'center');
+  if (flare > 0) {
+    c.globalAlpha = flare * 0.5;
+    c.fillStyle = PALETTE.light;
+    drawTabular(c, `${lap}`, cx, cy + size * 0.075, lapFont, 'center');
+    c.globalAlpha = 1;
+  }
+  c.fillStyle = INK.textDim;
+  c.font = `600 ${Math.max(9, size * 0.055)}px ${LABEL_FONT}`;
+  c.textAlign = 'left';
+  c.fillText(`/${RACE_LAPS}`, cx + gap / 2 + size * 0.02, cy + size * 0.075);
+  c.fillStyle = INK.textFaint;
+  c.letterSpacing = '0.14em';
+  c.textAlign = 'center';
+  c.fillText('LAP', cx, cy - size * 0.10);
+  c.letterSpacing = '0px';
+  c.textAlign = 'left';
+
+  // The riders. Ringed in the arena's dark so they never disappear into the
+  // boards, and the player is the larger of the two.
   const dot = (distance: number, colour: string, radius: number): void => {
     const p = pointOnOval(lapPhase(Math.min(distance, RACE_DISTANCE_M)), cx, cy, rx, ry);
+    c.fillStyle = 'rgba(7, 11, 14, 0.85)';
+    c.beginPath();
+    c.arc(p.x, p.y, radius + Math.max(1.5, size * 0.012), 0, Math.PI * 2);
+    c.fill();
     c.fillStyle = colour;
     c.beginPath();
     c.arc(p.x, p.y, radius, 0, Math.PI * 2);
     c.fill();
   };
-  dot(s.rival.distance, KIT.rivalAccent, Math.max(3, size * 0.032));
-  dot(s.player.distance, KIT.playerAccent, Math.max(3.5, size * 0.038));
+  dot(s.rival.distance, KIT.rivalAccent, Math.max(3.5, size * 0.035));
+  dot(s.player.distance, KIT.playerAccent, Math.max(4.5, size * 0.045));
 
   c.restore();
 }

@@ -5,14 +5,15 @@ import type { RaceState } from '../src/race.js';
 import { CHAMPION } from '../src/rivals.js';
 import {
   PX_PER_M_MAX, PX_PER_M_MIN, SCROLL_PX_PER_M, ZOOM_KNEE_M,
-  createRenderState, pointOnOval, targetScale, updateRenderState,
+  createRenderState, farTopAt, leanFor, pointOnOval, targetScale,
+  updateRenderState,
 } from '../src/render.js';
 
 /**
  * Only the pure geometry the view is built on. Drawing itself is not tested —
- * but a camera that pulls the world's speed around with it, or an oval that
- * is not a loop, are arithmetic mistakes rather than taste, and they are
- * cheap to catch.
+ * but a camera that pulls the world's speed around with it, an oval that is
+ * not a loop, or a far side that does not bend away, are arithmetic mistakes
+ * rather than taste, and they are cheap to catch.
  */
 
 const WIDTH = 1400;
@@ -97,6 +98,43 @@ describe('the ground', () => {
       return r.scroll;
     };
     expect(step(20)).toBeCloseTo(step(10) * 2, 6);
+  });
+});
+
+describe('the bowl', () => {
+  it('bends the far side away at both ends of the frame', () => {
+    const middle = farTopAt(WIDTH / 2, WIDTH, HEIGHT);
+    const left = farTopAt(0, WIDTH, HEIGHT);
+    const right = farTopAt(WIDTH, WIDTH, HEIGHT);
+    // Further away is higher up the screen.
+    expect(left).toBeLessThan(middle);
+    expect(right).toBeLessThan(middle);
+    expect(left).toBeCloseTo(right, 6);
+    // And the bend is worth seeing, not a couple of pixels.
+    expect(middle - left).toBeGreaterThan(HEIGHT * 0.15);
+  });
+
+  it('keeps the far straight flat through the middle of the frame', () => {
+    const middle = farTopAt(WIDTH / 2, WIDTH, HEIGHT);
+    const nearMiddle = farTopAt(WIDTH * 0.42, WIDTH, HEIGHT);
+    expect(Math.abs(nearMiddle - middle)).toBeLessThan(HEIGHT * 0.02);
+  });
+});
+
+describe('the lean', () => {
+  it('is upright on both straights', () => {
+    expect(leanFor(0)).toBeCloseTo(0, 6);
+    expect(leanFor(0.5)).toBeCloseTo(0, 6);
+    expect(leanFor(1)).toBeCloseTo(0, 6);
+  });
+
+  it('tips fully, and opposite ways, in the two bends', () => {
+    expect(leanFor(0.25)).toBeCloseTo(1, 6);
+    expect(leanFor(0.75)).toBeCloseTo(-1, 6);
+  });
+
+  it('never exceeds full lean', () => {
+    for (let i = 0; i <= 200; i++) expect(Math.abs(leanFor(i / 200))).toBeLessThanOrEqual(1);
   });
 });
 
