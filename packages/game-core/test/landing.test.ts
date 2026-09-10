@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  HOUSE_MATCH_RADIUS_M, PORCH_LATERAL, PORCH_TOLERANCE_M, STREET_LATERAL,
-  WINDOW_LATERAL, classifyLanding,
+  HOUSE_MATCH_RADIUS_M, PORCH_LATERAL, STREET_LATERAL, WINDOW_LATERAL,
+  classifyLanding,
 } from '../src/landing.js';
 import type { HouseSpec } from '../src/route.js';
 
@@ -36,27 +36,34 @@ describe('band boundaries', () => {
 
 describe('mailbox and porch tolerances', () => {
   it('accepts a mailbox hit at the edge of tolerance', () => {
-    expect(at(spec.mailboxLateral + 0.5).band).toBe('mailbox');
+    expect(at(spec.mailboxLateral + 0.3).band).toBe('mailbox');
   });
 
   it('rejects a mailbox hit just outside tolerance', () => {
-    // The low edge (mailboxLateral - tolerance) lands exactly on
-    // PORCH_LATERAL for this fixture, which routes into the porch check
-    // instead of ever reaching the mailbox tolerance test. Probe the high
-    // edge instead, which stays unambiguously in mailbox territory.
-    expect(at(spec.mailboxLateral + 0.51).band).toBe('lawn');
+    expect(at(spec.mailboxLateral - 0.31).band).toBe('lawn');
   });
 
   it('accepts a porch hit at the edge of tolerance', () => {
-    // spec.porchLateral (1.9) + PORCH_TOLERANCE_M (0.8) = 2.7, which
-    // overflows past PORCH_LATERAL (2.6) into mailbox territory (and, at
-    // 0.4m from mailboxLateral, is well inside the mailbox tolerance too)
-    // -- so it can never read back as 'porch'. Use a house whose porch
-    // tolerance window fits entirely inside the porch zone instead.
-    const near = { ...spec, porchLateral: 1.5 };
-    const edge = near.porchLateral + PORCH_TOLERANCE_M;
-    expect(classifyLanding({ distance: 100, lateral: edge }, [near]).band)
-      .toBe('porch');
+    // Not +0.45 (== PORCH_TOLERANCE_M) -- floating point makes
+    // |2.35 - 1.9| evaluate to 0.45000000000000018, which fails the <=
+    // comparison. 0.44 keeps this test about the tolerance, not about
+    // float representation.
+    expect(at(spec.porchLateral + 0.44).band).toBe('porch');
+  });
+});
+
+describe('a miss must be reachable', () => {
+  // The combo multiplier only means anything if throwing at a house can
+  // actually miss. Pin that a genuine 'lawn' outcome exists in both the
+  // porch and mailbox bands for a standard house, so nobody can widen
+  // PORCH_TOLERANCE_M / MAILBOX_TOLERANCE_M back toward "always scores"
+  // without a test failing.
+  it('has a lawn gap in the mailbox band', () => {
+    expect(at(spec.mailboxLateral - 0.31).band).toBe('lawn');
+  });
+
+  it('has a lawn gap in the porch band', () => {
+    expect(at(spec.porchLateral + 0.46).band).toBe('lawn');
   });
 });
 

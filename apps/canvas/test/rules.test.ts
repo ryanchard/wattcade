@@ -68,12 +68,7 @@ describe('classifyLanding through the shared rules', () => {
   });
 
   it('calls a near miss on the lawn', () => {
-    // 2.7 would look like a "middle ground" miss, but it is only 0.4m from
-    // this house's mailboxLateral (3.1) -- well inside the 0.5m mailbox
-    // tolerance, so it actually reads as a mailbox hit. 3.65 sits just
-    // past the mailbox tolerance window and short of the street, which is
-    // this fixture's only genuine lawn gap.
-    expect(classifyLanding({ distance: 100, lateral: 3.65 }, specs).band)
+    expect(classifyLanding({ distance: 100, lateral: 2.7 }, specs).band)
       .toBe('lawn');
   });
 
@@ -162,8 +157,7 @@ describe('updatePapers', () => {
 
   it('breaks the combo when a paper lands on the lawn', () => {
     const w = ready();
-    // See the "near miss on the lawn" test above for why 3.65, not 2.7.
-    thrownAt(w, house(), 3.65);
+    thrownAt(w, house(), 2.7);
     expect(updatePapers(w, 1 / 30)).toEqual([{ type: 'lawn' }]);
   });
 
