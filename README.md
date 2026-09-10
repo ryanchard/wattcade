@@ -237,9 +237,14 @@ These are working prototypes built quickly, not a product.
   then left alone.
 - Most of them have never been properly ridden. Anything below about "it runs
   and the maths is tested" is an untested claim.
-- There is no fatigue model. Nothing in any game knows or cares that you went
-  too deep four minutes ago, so pacing — the actual skill in cycling — costs
-  you nothing yet. This is the biggest gap.
+- There is a fatigue model now, in Velodrome and The Pack: a W′ anaerobic
+  store that drains above threshold, refills below it much more slowly, and
+  takes your sprint away when it is gone. Both you and the rivals race on it,
+  so pacing costs something at last. It has not been ridden on hardware, and
+  the two numbers most likely to be wrong are how fast the store comes back
+  and how sharply the legs go. Paperboy, Fish and Spin Cycle do not use it;
+  the last two are cadence-steered on purpose and a fatigue model would tax
+  the steering wheel.
 - The high score table is per-browser `localStorage`. There is no account, no
   server and no sync.
 

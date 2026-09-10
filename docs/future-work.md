@@ -83,63 +83,85 @@ to the bars — all of that wants a ride and a controller.
 
 ---
 
-## 2. The velodrome is too easy
+## 2. The velodrome is too easy — FATIGUE SHIPPED
 
 **Observed:** "I won every race first time."
 
-That is a real failure of the ladder, and the cause is already understood. The
-rivals scale off FTP, every race finishes in a sprint, and a rider with a high
-sprint-to-FTP ratio out-kicks all six regardless of whether they read any of
-the patterns. The tactical game the ladder was built around never has to
-happen.
+That was a real failure of the ladder: the rivals scale off FTP, every race
+finishes in a sprint, and a rider with a high sprint-to-FTP ratio out-kicked
+all six regardless of whether they read any of the patterns. Nothing anyone
+spent ever ran out — both riders' kilojoules were tracked and then read
+exactly once, at the end, for the results card.
 
-**The fix is the fatigue model (W′), not harder rivals.** Making the rivals
-faster would just make the sprint start earlier. What is missing is that
-nothing you spend ever runs out:
+**What shipped: W′, for the player and for every rival.**
+`@paperboy/game-core`'s `fatigue.ts` is the critical-power model — a finite
+anaerobic store that drains at exactly `(P − CP)` above threshold, refills
+below it, and takes the sprint away when it is gone. It is shared, pure and
+headless for the same reason `classifyLanding` and `isHazardActive` are: a
+game and a rival must run the identical implementation or the tactics are
+dishonest.
 
-- A full-gas finish costs roughly 39% of a typical anaerobic battery.
-- Covering all five of one rival's attacks costs about 34%.
+Recovery is **not** the mirror of depletion. Depletion is bookkeeping;
+refilling is physiology and much slower. It uses Skiba's reconstitution —
+exponential toward full with `tau = 546·e^(−0.01·DCP) + 316` seconds, where
+DCP is how far below CP the rider has dropped — so soft-pedalling just under
+threshold barely refills anything and stopping dead refills fastest. The one
+liberty is `RECOVERY_TAU_SCALE = 1/3`: Skiba's constants are fitted to
+interval sessions of many minutes and a race here is seventy seconds, and at
+the published tau twenty seconds of shelter returns about 3% of the deficit,
+which would make "recover in their draft between the attacks" — a counter this
+game prints on its own results card — unimplementable.
 
-So with W′ in place you physically cannot both police a race and win the
-sprint — which is the decision the ladder was supposed to be about. It also
-fixes the Flyer, whose entire lesson is "do not chase" but who currently
-punishes chasing not at all.
+**Nobody was asked for a third number.** W′ is seeded from the FTP and sprint
+already on the profile, because sprint-to-FTP ratio is exactly what FTP cannot
+tell you: 22.0 kJ for a 235 W rider who sprints at 1184 W, 15.0 kJ for the
+200/700 default. The box is editable for anyone who has had theirs measured,
+and a store the rider has not touched keeps tracking the two numbers it is
+seeded from.
 
-**Effort:** moderate, and it touches the shared physics rather than one game.
-It needs a W′ value on the rider profile (seedable from FTP and sprint power),
-depletion above threshold, recovery below, and a HUD readout. Then a
-ride-and-tune loop, because the numbers only mean something once felt.
+**A spent rider fades.** `sustainablePower()` scales the watts above CP down
+toward CP over the last fifth of the store, and the drain is taken from the
+faded power rather than the demanded power, so the tail is exponential: a
+949 W kick on the last fifth of a 22 kJ store sags away over about fifteen
+seconds rather than switching off. Both riders go through it. That is the
+mechanism that makes "force the pace" real.
 
-### The rivals need a battery too, not just the player
+**Sitting in became a saving rather than only a speed bonus.** A rival's base
+curve is now read as an intended pace, and `RIVAL_SHELTER_BANK = 0.5` splits
+what the wheel in front is worth — half into closing on it, half into the
+tank. All of it as speed was the old behaviour and is why a rival could never
+be worn down; all of it as energy is worse, because a scripted rival glued to
+your wheel at exactly your pace would never come past and leading a whole race
+would cost nothing. The saving is subtracted in watts (`draftSavingWatts`)
+rather than scaled off the demand: only the air term moves, and a scaled
+demand had a sheltered rival accelerating slower than the rider it was sitting
+on and dropping the wheel in the first ten seconds of every race.
 
-Verified in the code, and it is worse than "the player's sprint is free".
+**Two archetypes now read their own state.** The Wheelsucker will not spend
+what it has left to hold a wheel, so forcing the pace is at last a way to get
+rid of it. The Champion goes when the rider is spent, and does not answer an
+attack she cannot afford.
 
-Drafting *is* modelled symmetrically — a rival on your wheel gets exactly the
-shelter you would, and the source says so: "model it symmetrically or the
-tactics are dishonest". But neither side has anything that depletes. Both
-riders' kilojoules are tracked and then read exactly once, at the end, to
-compute average power for the results card. Nothing feeds back into
-behaviour.
+What a race costs the owner (FTP 235, 22.0 kJ), simulated:
 
-So a rival cannot be worn down. Drag one round the track at 400 W for four
-laps and it finishes as fresh as one that sat in the whole way. The saving a
-rival banks by drafting is a speed bonus in the moment, not a stored
-resource, because there is no store.
+| plan | Diesel | Flyer | Attacker | Feinter | Wheelsucker | Champion |
+| --- | --- | --- | --- | --- | --- | --- |
+| sit in, kick at 200 m | won, 40% | lost | lost | lost | won, 40% | won by 0.2 m, 41% |
+| cover every move, then kick | won, 40% | won, 48% | won, 54% | won, 48% | won, 85% | won, 50% |
+| even tempo, no kick | won, 0% | won, 0% | won, 0% | won, 0% | lost | lost |
 
-**This makes one of the six counters fiction.** Ryan the Wheelsucker is
-described as beatable by "force the pace, or play chicken and jump before they
-do". The first half cannot work — there is no mechanism by which forcing the
-pace costs them anything. Only the timing half functions, and the game is
-advertising a tactic it does not implement.
+One kick is 40% of the store, which is the whole point: it is still there, and
+it is now the only one you get. The same three plans on a diesel's profile —
+same FTP, a 550 W sprint, a 14.4 kJ store — lose the Champion by 21 m instead
+of winning by 0.2, and have to win on pacing instead.
 
-Forcing the pace, wearing someone down, making them chase, sitting in to save
-yourself: none of that vocabulary means anything until BOTH sides have a
-finite battery. W' is therefore not just a difficulty fix for the player — it
-is what makes the rivals' stated counters true.
+**Still to confirm on hardware.** Nobody has ridden it. `RECOVERY_TAU_SCALE`
+and `FADE_FROM_FRACTION` are the two that will want moving, and the thing to
+watch is whether the last lap feels like legs going or like a slider closing.
 
-**Difficulty levels are the cheaper alternative** and worth having anyway —
-scaling rival power and aggression by a chosen tier. But they treat the
-symptom. A harder Diesel is still beaten by the same one kick.
+**Difficulty levels are still worth having** — scaling rival power and
+aggression by a chosen tier — but they treat the symptom, and a harder Diesel
+is still beaten by the same one kick.
 
 ---
 
