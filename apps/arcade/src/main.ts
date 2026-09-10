@@ -326,6 +326,9 @@ function frame(now: number): void {
     drawBand(ctx, {
       trainer,
       watts: ride.powerCurrent,
+      // The same cadence the session is handed, from the same field, so the
+      // band can never disagree with the game it is sitting under.
+      cadenceRpm: ride.cadenceRpm,
       elapsedS: ride.elapsedS,
       lines: session.hud(),
     }, width, height);

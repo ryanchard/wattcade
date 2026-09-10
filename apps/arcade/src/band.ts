@@ -33,8 +33,22 @@ function statusColour(view: TrainerView): string {
 export interface BandModel {
   readonly trainer: TrainerView;
   readonly watts: number;
+  /** Cadence as the trainer last reported it, or null when it reports none. */
+  readonly cadenceRpm: number | null;
   readonly elapsedS: number;
   readonly lines: readonly HudLine[];
+}
+
+/**
+ * Cadence for the band. Null gets an em dash rather than a zero, because a
+ * trainer that reports no cadence and a rider who has stopped pedalling are
+ * different facts and only one of them is the rider's fault. Every game reads
+ * this same figure from this one place, so the number can never disagree with
+ * itself between games.
+ */
+export function formatCadence(rpm: number | null): string {
+  if (rpm === null || !Number.isFinite(rpm)) return '—';
+  return String(Math.round(rpm));
 }
 
 function clock(seconds: number): string {
@@ -61,14 +75,23 @@ export function drawBand(
   ctx.fillStyle = statusColour(model.trainer);
   ctx.fillText(model.trainer.headline, 16, mid);
 
-  // Right: watts and the clock, tabular so neither jitters as it counts.
+  // Right: cadence, watts and the clock, tabular so none of them jitters as
+  // it counts. Laid out right to left, each figure clearing the one before it,
+  // so a four-digit wattage cannot shunt the cadence into the game's own HUD.
   ctx.textAlign = 'right';
   ctx.font = `600 14px ${MONO}`;
   ctx.fillStyle = TEXT;
-  const right = width - 16;
-  ctx.fillText(clock(model.elapsedS), right, mid);
-  const clockWidth = ctx.measureText(clock(model.elapsedS)).width;
-  ctx.fillText(`${Math.round(model.watts)} W`, right - clockWidth - 22, mid);
+  let cursor = width - 16;
+  const clockText = clock(model.elapsedS);
+  ctx.fillText(clockText, cursor, mid);
+  cursor -= ctx.measureText(clockText).width + 22;
+  const wattsText = `${Math.round(model.watts)} W`;
+  ctx.fillText(wattsText, cursor, mid);
+  cursor -= ctx.measureText(wattsText).width + 22;
+  // Dimmed when there is no reading, so "no cadence sensor" looks like the
+  // absence it is rather than a number the rider should be trying to move.
+  ctx.fillStyle = model.cadenceRpm === null ? DIM : TEXT;
+  ctx.fillText(`${formatCadence(model.cadenceRpm)} rpm`, cursor, mid);
 
   // Middle: whatever this game asked the shell to show.
   if (model.lines.length > 0) {
