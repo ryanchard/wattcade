@@ -5,7 +5,8 @@ import {
 } from '@paperboy/game-core';
 import { surfaceCrr } from '../src/logic/entities.js';
 import {
-  MAX_PAPERS, PaperboyRun, START_LIVES, START_PAPERS,
+  FLAT_SIMULATION, MAX_PAPERS, PaperboyRun, STACK_PAPERS, START_LIVES,
+  START_PAPERS,
 } from '../src/logic/run.js';
 
 const still = { steer: 0, throwPaper: false };
@@ -165,17 +166,43 @@ describe('throwing', () => {
     expect(house.delivered).toBe(false);
   });
 
+  it('collects an untaken stack once, increasing papers, and cannot be collected twice', () => {
+    // Regression: the test this replaces set papers to MAX_PAPERS - 1 and
+    // asserted papers <= MAX_PAPERS, which holds whether or not the stack
+    // was ever actually collected (29 <= 30 either way) -- and it was
+    // Version B's only stack test. This one pins the real behaviour:
+    // papers genuinely increase, the runtime stack is marked taken, and a
+    // second pass over the same spot does not pay out again.
+    const r = make();
+    r.update(1 / 60, still);
+    // Block 0 always spawns a stack (route.ts: `index === 0 || rng() < 0.55`).
+    const stackSpec = r.streamer.blocks[0]!.stacks[0]!;
+    expect(stackSpec).toBeDefined();
+
+    r.rider.papers = START_PAPERS - 5;
+    r.rider.distance = stackSpec.distance;
+    r.rider.lateral = stackSpec.lateral;
+    r.update(1 / 60, still);
+
+    expect(r.rider.papers).toBe(START_PAPERS - 5 + STACK_PAPERS);
+    expect(r.stacks.get(stackSpec.id)!.taken).toBe(true);
+
+    const afterFirst = r.rider.papers;
+    r.rider.distance = stackSpec.distance;
+    r.rider.lateral = stackSpec.lateral;
+    r.update(1 / 60, still);
+    expect(r.rider.papers).toBe(afterFirst);
+  });
+
   it('never exceeds the paper cap when collecting a stack', () => {
     const r = make();
     r.update(1 / 60, still);
+    const stackSpec = r.streamer.blocks[0]!.stacks[0]!;
     r.rider.papers = MAX_PAPERS - 1;
-    const stack = r.streamer.blocks[0]!.stacks[0];
-    if (stack !== undefined) {
-      r.rider.distance = stack.distance;
-      r.rider.lateral = stack.lateral;
-      r.update(1 / 60, still);
-      expect(r.rider.papers).toBeLessThanOrEqual(MAX_PAPERS);
-    }
+    r.rider.distance = stackSpec.distance;
+    r.rider.lateral = stackSpec.lateral;
+    r.update(1 / 60, still);
+    expect(r.rider.papers).toBe(MAX_PAPERS);
   });
 });
 
@@ -266,6 +293,62 @@ describe('trainer feedback', () => {
     const road = r.simulation().crr;
     r.rider.lateral = 2.2;
     expect(r.simulation().crr).toBeGreaterThan(road);
+  });
+
+  it('never asks for a grade beyond the trainer clamp', () => {
+    // The generated route tops out at ~6% grade, so walking it never
+    // approaches the +/-8 clamp and would pass even if simulation() did
+    // not call clampGrade at all (see run.test.ts's own note above the
+    // previous test). Force the boundary directly instead, the same way
+    // Version A's session.test.ts does.
+    const r = make();
+    r.update(1 / 60, still);
+    const block = r.streamer.blocks[0]!;
+
+    block.gradePercent = 99;
+    expect(r.simulation().grade).toBe(8);
+
+    block.gradePercent = -99;
+    expect(r.simulation().grade).toBe(-8);
+
+    block.gradePercent = Number.NaN;
+    expect(r.simulation().grade).toBe(0);
+  });
+});
+
+describe('effectiveSimulation', () => {
+  // This is the entire panic-key mechanism for Version B: main.ts's 30 Hz
+  // interval makes exactly one setSimulation call per tick using this
+  // function's result, and ControlPointWriter only ever flushes the last
+  // value set before it coalesces. Version A's session.test.ts pins the
+  // identical three properties for effectiveSimulation/simulationFor; this
+  // is that same coverage for Version B, which previously had none at all.
+
+  it('passes through the track simulation while riding normally', () => {
+    const r = make();
+    r.update(1 / 60, still);
+    expect(r.effectiveSimulation()).toEqual(r.simulation());
+  });
+
+  it('flattens resistance to zero grade while paused, so a panic or pause press relaxes the trainer', () => {
+    const r = make();
+    r.update(1 / 60, still);
+    r.paused = true;
+    expect(r.effectiveSimulation()).toEqual(FLAT_SIMULATION);
+    expect(r.effectiveSimulation().grade).toBe(0);
+  });
+
+  it('flattens resistance to zero grade once the run is over', () => {
+    // Regression: the frame that flips gameOver must not still send the
+    // ordinary (possibly steep) grade before the game-over check runs, and
+    // nothing else ever touches the trainer again afterwards once main.ts
+    // nulls street.run.
+    const r = make();
+    r.update(1 / 60, still);
+    r.streamer.blocks[0]!.gradePercent = 6;
+    r.gameOver = true;
+    expect(r.effectiveSimulation()).toEqual(FLAT_SIMULATION);
+    expect(r.effectiveSimulation().grade).toBe(0);
   });
 });
 
