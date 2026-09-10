@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { DEFAULT_RIDER } from '@paperboy/trainer';
-import { isHazardActive } from '@paperboy/game-core';
+import { hazardPositionAt, isHazardActive } from '@paperboy/game-core';
 import type { HazardSpec, HouseSpec } from '@paperboy/game-core';
 import { PX_PER_M, project, toBodyX, toBodyY } from '../iso.js';
 import type { EntityRecord } from '../logic/entities.js';
@@ -230,9 +230,15 @@ export class StreetScene extends Phaser.Scene {
         // everything else, which is driven by fixed substeps of run time.
         v.distance -= v.spec.speed * dt;
       } else {
-        const t = run.elapsed + v.spec.phase * 10;
-        v.lateral = v.spec.lateral + Math.sin(t * 0.8) * 0.8;
-        v.distance = v.spec.distance + Math.sin(t * 0.4) * 2;
+        // Everything else weaves across its own band, using the shared
+        // definition (packages/game-core/src/hazard.ts) — this used to be
+        // a hand copy of Version A's formula that dropped its lateral
+        // clamp, letting a weaving hazard swing into the house footprint
+        // here but not in Version A. Calling the shared function keeps
+        // that clamp (and the whole formula) identical in both engines.
+        const pos = hazardPositionAt(v.spec, run.elapsed);
+        v.lateral = pos.lateral;
+        v.distance = pos.distance;
       }
       v.zone.setPosition(toBodyX(v.distance), toBodyY(v.lateral));
     }
