@@ -17,10 +17,17 @@ export function createInput(target: EventTarget): {
   const down = (e: Event) => {
     const key = (e as KeyboardEvent).key;
     held.add(key);
+    // Held arrows keep steering via `held`, so the key still needs to be
+    // preventDefault-ed on every repeat (a held arrow must not scroll the
+    // page) even though the edge-triggered flags below must not be.
+    if (key === ' ' || key.startsWith('Arrow')) e.preventDefault();
+    // OS auto-repeat re-fires keydown for a held key. Without this guard a
+    // held Space rapid-fires throws every ~30-60ms — exactly what
+    // edge-triggering exists to prevent.
+    if ((e as KeyboardEvent).repeat) return;
     if (key === ' ') throwPressed = true;
     if (key === 'p' || key === 'P') pausePressed = true;
     if (key === 'Escape') panicPressed = true;
-    if (key === ' ' || key.startsWith('Arrow')) e.preventDefault();
   };
   const up = (e: Event) => held.delete((e as KeyboardEvent).key);
   const blur = () => held.clear();

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_RIDER } from '@paperboy/trainer';
 import { START_PAPERS } from '../src/world.js';
 import {
-  FIXED_DT, advance, advanceFixed, createSession, setPower,
-  simulationFor, toRunResult,
+  FIXED_DT, FLAT_SIMULATION, MAX_SUBSTEPS, advance, advanceFixed,
+  createSession, effectiveSimulation, setPower, simulationFor, toRunResult,
 } from '../src/session.js';
 
 const still = { steer: 0, throwPaper: false };
@@ -94,17 +94,45 @@ describe('advanceFixed', () => {
   });
 
   it('caps substeps so a stalled tab cannot freeze the loop', () => {
+    // A wall-clock assertion here cannot fail: even with the cap removed,
+    // 600 s worth of substeps still runs to completion in a handful of
+    // milliseconds, well under any reasonable timeout. The property that
+    // actually matters is how much SIMULATED time advanced: a genuine
+    // stall must be capped to MAX_SUBSTEPS worth of game time, not replayed
+    // in full.
     const s = createSession(42, DEFAULT_RIDER);
     setPower(s, 250);
-    const start = Date.now();
     advanceFixed(s, 600, still);
-    expect(Date.now() - start).toBeLessThan(2000);
+    expect(s.world.elapsed).toBeCloseTo(MAX_SUBSTEPS * FIXED_DT, 9);
   });
 
   it('throws only once even when a frame spans many substeps', () => {
     const s = createSession(42, DEFAULT_RIDER);
     advanceFixed(s, 0.5, { steer: 0, throwPaper: true });
     expect(s.world.rider.papers).toBe(START_PAPERS - 1);
+  });
+
+  it('carries a pending throw across frames that run zero substeps', () => {
+    // At a high refresh rate a single frame can be shorter than FIXED_DT
+    // and run zero substeps. The throw pressed on such a frame must not be
+    // lost — it should be spent by the first substep that does run.
+    const s = createSession(42, DEFAULT_RIDER);
+    advanceFixed(s, 0.001, { steer: 0, throwPaper: true });
+    expect(s.world.rider.papers).toBe(START_PAPERS);
+
+    for (let i = 0; i < 20; i++) advanceFixed(s, 0.001, still);
+    expect(s.world.rider.papers).toBe(START_PAPERS - 1);
+  });
+
+  it('never runs zero substeps forever at a high refresh rate', () => {
+    // Regression for the 144Hz freeze: dt ~ 6.94ms is smaller than
+    // FIXED_DT ~ 8.33ms, so Math.floor(dt / FIXED_DT) is 0 on every single
+    // frame without a carried accumulator.
+    const s = createSession(42, DEFAULT_RIDER);
+    setPower(s, 250);
+    const highRefreshDt = 1 / 144;
+    for (let i = 0; i < 1000; i++) advanceFixed(s, highRefreshDt, still);
+    expect(s.world.elapsed).toBeGreaterThan(1000 * highRefreshDt * 0.9);
   });
 });
 
@@ -126,12 +154,56 @@ describe('simulationFor', () => {
   });
 
   it('never asks for a grade beyond the trainer clamp', () => {
+    // The generated route tops out at ~6% grade, so walking it never
+    // approaches the +/-8 clamp and would pass even if simulationFor did
+    // not call clampGrade at all. Force the boundary directly instead.
     const s = createSession(42, DEFAULT_RIDER);
-    for (let i = 0; i < 200; i++) {
-      s.world.rider.distance = i * 120;
-      advance(s, still, 1 / 60);
-      expect(Math.abs(simulationFor(s).grade)).toBeLessThanOrEqual(8);
-    }
+    advance(s, still, 1 / 60);
+    const block = s.world.blocks[0]!;
+
+    block.gradePercent = 99;
+    expect(simulationFor(s).grade).toBe(8);
+
+    block.gradePercent = -99;
+    expect(simulationFor(s).grade).toBe(-8);
+
+    block.gradePercent = Number.NaN;
+    expect(simulationFor(s).grade).toBe(0);
+  });
+});
+
+describe('effectiveSimulation', () => {
+  it('passes through the track simulation while riding normally', () => {
+    const s = createSession(42, DEFAULT_RIDER);
+    advance(s, still, 1 / 60);
+    expect(effectiveSimulation(s)).toEqual(simulationFor(s));
+  });
+
+  it('flattens resistance to zero grade while paused, so a panic or pause press relaxes the trainer', () => {
+    // The panic key (Escape) and the pause key both work by setting
+    // s.paused = true; this is the property that makes both of them
+    // actually zero out resistance, since main.ts's frame loop makes
+    // exactly one setSimulation call per frame using this function's
+    // result, and a coalescing ControlPointWriter only ever flushes the
+    // last value set.
+    const s = createSession(42, DEFAULT_RIDER);
+    advance(s, still, 1 / 60);
+    s.paused = true;
+    expect(effectiveSimulation(s)).toEqual(FLAT_SIMULATION);
+    expect(effectiveSimulation(s).grade).toBe(0);
+  });
+
+  it('flattens resistance to zero grade once the run is over', () => {
+    // Regression: previously the frame that flips gameOver still sent the
+    // ordinary (possibly steep) grade before the game-over check ran, and
+    // nothing ever touched the trainer again afterwards because endRun
+    // nulls the session.
+    const s = createSession(42, DEFAULT_RIDER);
+    advance(s, still, 1 / 60);
+    s.world.blocks[0]!.gradePercent = 6;
+    s.world.gameOver = true;
+    expect(effectiveSimulation(s)).toEqual(FLAT_SIMULATION);
+    expect(effectiveSimulation(s).grade).toBe(0);
   });
 });
 

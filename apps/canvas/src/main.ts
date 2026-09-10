@@ -9,7 +9,8 @@ import { createInput } from './input.js';
 import { drawHud } from './hud.js';
 import { renderFrame } from './render/scene.js';
 import {
-  advanceFixed, createSession, setPower, simulationFor, toRunResult,
+  FLAT_SIMULATION, advanceFixed, createSession, effectiveSimulation,
+  setPower, toRunResult,
 } from './session.js';
 import type { Session } from './session.js';
 
@@ -43,6 +44,12 @@ async function useSource(next: TrainerSource): Promise<void> {
       s.kind === 'connected'
         ? `${s.deviceName ?? 'trainer'}${s.canControlResistance ? '' : ' (read-only)'}`
         : s.message ?? s.kind;
+    // A dropped connection must not leave the rider coasting forever on
+    // the last power reading — decay it back toward zero like an actual
+    // stop pedalling would.
+    if (session !== null && (s.kind === 'disconnected' || s.kind === 'error')) {
+      setPower(session, 0);
+    }
   });
   next.onSample((s) => {
     if (session !== null) setPower(session, s.power);
@@ -118,6 +125,9 @@ function endRun(s: Session): void {
     startRun(result.seed),
   );
   document.getElementById('menu')!.addEventListener('click', showMenu);
+  // The trainer must be left relaxed while the summary card is up, not
+  // still holding whatever grade was in effect at the moment of the crash.
+  source?.setSimulation(FLAT_SIMULATION);
   session = null;
 }
 
@@ -127,17 +137,20 @@ function frame(now: number): void {
   const state = input.read();
 
   if (session !== null) {
-    if (state.panicPressed) {
-      source?.setSimulation({ grade: 0, headwind: 0, crr: 0.004, cw: 0.51 });
-      session.paused = true;
-    }
+    if (state.panicPressed) session.paused = true;
     if (state.pausePressed) session.paused = !session.paused;
 
     advanceFixed(session, dt, {
       steer: state.steer,
       throwPaper: state.throwPressed,
     });
-    source?.setSimulation(simulationFor(session));
+
+    // Exactly one setSimulation call per frame, and it must be the last
+    // thing said about resistance this frame: ControlPointWriter coalesces
+    // pending writes, so only the value set here — flat while paused,
+    // panicked or game-over, the track otherwise — is the one that
+    // survives to the next flush.
+    source?.setSimulation(effectiveSimulation(session));
 
     renderFrame(ctx, session.world, window.innerWidth, window.innerHeight);
     drawHud(ctx, session, window.innerWidth, trainerLabel);
@@ -149,7 +162,7 @@ function frame(now: number): void {
 }
 
 window.addEventListener('beforeunload', () => {
-  source?.setSimulation({ grade: 0, headwind: 0, crr: 0.004, cw: 0.51 });
+  source?.setSimulation(FLAT_SIMULATION);
   void source?.stop();
 });
 

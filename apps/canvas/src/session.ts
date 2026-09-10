@@ -22,6 +22,19 @@ export interface Session {
   powerCurrent: number;
   kilojoules: number;
   paused: boolean;
+  /**
+   * Time left over from the last advanceFixed call that wasn't enough to
+   * fill a whole FIXED_DT substep. Without this, any frame shorter than
+   * FIXED_DT (e.g. every frame at 144 Hz, where dt ~ 6.9 ms < 8.3 ms)
+   * advances zero substeps and the game never moves.
+   */
+  accumulator: number;
+  /**
+   * A throw press that arrived on a frame which ran zero substeps. It is
+   * carried forward rather than dropped, and is consumed by the first
+   * substep that does run.
+   */
+  pendingThrow: boolean;
 }
 
 export interface SessionInput {
@@ -37,6 +50,8 @@ export function createSession(seed: number, profile: RiderProfile): Session {
     powerCurrent: 0,
     kilojoules: 0,
     paused: false,
+    accumulator: 0,
+    pendingThrow: false,
   };
 }
 
@@ -70,11 +85,25 @@ export function advance(
 export function advanceFixed(
   s: Session, elapsedS: number, input: SessionInput,
 ): void {
-  const steps = Math.min(MAX_SUBSTEPS, Math.floor(elapsedS / FIXED_DT));
-  for (let i = 0; i < steps; i++) {
-    // A throw is edge-triggered: only the first substep of a frame may throw.
-    advance(s, { steer: input.steer, throwPaper: input.throwPaper && i === 0 }, FIXED_DT);
+  // A throw is edge-triggered, but it must survive a frame that runs zero
+  // substeps (see `pendingThrow` on Session) rather than being dropped.
+  if (input.throwPaper) s.pendingThrow = true;
+
+  s.accumulator += elapsedS;
+
+  let steps = 0;
+  while (s.accumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
+    const throwPaper = s.pendingThrow;
+    s.pendingThrow = false;
+    advance(s, { steer: input.steer, throwPaper }, FIXED_DT);
+    s.accumulator -= FIXED_DT;
+    steps += 1;
   }
+
+  // A genuine stall (tab backgrounded, debugger paused, ...) should drop
+  // its backlog of substeps rather than replay them all in one burst once
+  // the tab wakes back up.
+  if (steps === MAX_SUBSTEPS) s.accumulator = 0;
 }
 
 export function simulationFor(s: Session): SimulationParams {
@@ -84,6 +113,30 @@ export function simulationFor(s: Session): SimulationParams {
     crr: surfaceCrr(s.world.rider.lateral),
     cw: 0.51,
   };
+}
+
+/**
+ * The flat, unloaded simulation a resting trainer should see: zero grade,
+ * zero headwind, a token rolling resistance, and an arbitrary (unused at
+ * zero grade) drag coefficient. Used whenever the rider is not actually
+ * being asked to push against the road — paused, panicked, or the run is
+ * over — so a coalescing writer's next flush always carries this value
+ * rather than a stale grade from the moment the state changed.
+ */
+export const FLAT_SIMULATION: SimulationParams = {
+  grade: 0, headwind: 0, crr: 0.004, cw: 0.51,
+};
+
+/**
+ * The single simulation value the app should send to the trainer this
+ * frame. Callers must make exactly one setSimulation call per frame using
+ * this value — never the raw `simulationFor` result directly and never a
+ * second call afterwards — because ControlPointWriter coalesces pending
+ * writes and only the last value set before a flush is the one that
+ * reaches the wire.
+ */
+export function effectiveSimulation(s: Session): SimulationParams {
+  return s.paused || s.world.gameOver ? FLAT_SIMULATION : simulationFor(s);
 }
 
 export function toRunResult(s: Session): RunResult {
