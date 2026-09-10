@@ -5,7 +5,6 @@ export function drawHud(
   ctx: CanvasRenderingContext2D,
   s: Session,
   width: number,
-  trainerLabel: string,
 ): void {
   const w = s.world;
   ctx.save();
@@ -25,10 +24,5 @@ export function drawHud(
 
   ctx.textAlign = 'right';
   ctx.fillText(`${(w.rider.speed * 3.6).toFixed(1)} km/h`, width - 20, 18);
-  ctx.fillStyle = PALETTE.hudDim;
-  ctx.font = '400 14px ui-monospace, SFMono-Regular, Menlo, monospace';
-  ctx.fillText(`${Math.round(s.powerCurrent)} W`, width - 20, 46);
-  ctx.fillText(`${Math.round(w.rider.distance)} m`, width - 20, 64);
-  ctx.fillText(trainerLabel, width - 20, 82);
   ctx.restore();
 }
