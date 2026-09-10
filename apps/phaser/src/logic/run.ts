@@ -149,6 +149,16 @@ export class PaperboyRun {
     this.powerCurrent += (this.powerTarget - this.powerCurrent) * alpha;
     this.kilojoules += (this.powerCurrent * dt) / 1000;
 
+    // Stream blocks for the rider's CURRENT (pre-move) position before
+    // reading the grade physics will use this frame. Version A does the
+    // equivalent by calling ensureBlocks(w) before steer/advanceRider. Doing
+    // this after stepPhysics instead would mean the very first update of a
+    // fresh run reads gradeAt(0) before block 0 exists, silently falling back
+    // to a flat 0% grade for one frame -- a real parity break between the
+    // two engines, since Version A never does that.
+    const stream = this.streamer.update(this.rider.distance);
+    this.#absorb(stream);
+
     this.rider.lateral = Math.max(
       RIDABLE_MIN,
       Math.min(RIDABLE_MAX, this.rider.lateral + input.steer * STEER_RATE * dt),
@@ -168,9 +178,6 @@ export class PaperboyRun {
     this.rider.speed = next.speed;
     this.rider.distance = next.distance;
     this.elapsed += dt;
-
-    const stream = this.streamer.update(this.rider.distance);
-    this.#absorb(stream);
 
     if (input.throwPaper) this.throwPaper();
 

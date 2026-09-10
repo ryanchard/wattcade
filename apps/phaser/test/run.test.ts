@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RIDER } from '@paperboy/trainer';
-import { BLOCK_LENGTH_M, RIDABLE_MAX, RIDABLE_MIN } from '@paperboy/game-core';
+import { DEFAULT_RIDER, stepPhysics } from '@paperboy/trainer';
+import {
+  BLOCK_LENGTH_M, RIDABLE_MAX, RIDABLE_MIN, generateBlock,
+} from '@paperboy/game-core';
+import { surfaceCrr } from '../src/logic/entities.js';
 import {
   MAX_PAPERS, PaperboyRun, START_LIVES, START_PAPERS,
 } from '../src/logic/run.js';
@@ -59,6 +62,39 @@ describe('riding', () => {
     r.update(1, still);
     expect(r.rider.distance).toBe(0);
   });
+
+  it('feeds physics block 0\'s real grade on the very first update, not a flat fallback', () => {
+    // Regression: stepPhysics must read a grade that reflects block 0,
+    // which requires the streamer to have generated it before physics
+    // runs. If the streamer instead ran after physics (as it briefly did),
+    // this very first update would compute gradeAt(0) against an empty
+    // block list, silently falling back to 0% for one frame -- a real
+    // divergence from Version A, which streams before it moves the rider.
+    const seed = 42;
+    const grade0 = generateBlock(seed, 0).gradePercent;
+    // Sanity: seed 42's block 0 is a genuine, non-flat grade, so a 0%
+    // fallback is actually distinguishable from the real value.
+    expect(grade0).not.toBe(0);
+
+    const r = new PaperboyRun(seed, DEFAULT_RIDER);
+    r.setPower(300);
+    r.update(1 / 60, still);
+
+    const expected = stepPhysics(
+      { speed: 0, distance: 0 },
+      {
+        powerWatts: r.powerCurrent,
+        gradePercent: grade0,
+        crr: surfaceCrr(r.rider.lateral),
+        headwind: 0,
+      },
+      DEFAULT_RIDER,
+      1 / 60,
+    );
+
+    expect(r.rider.distance).toBe(expected.distance);
+    expect(r.rider.speed).toBe(expected.speed);
+  });
 });
 
 describe('throwing', () => {
@@ -93,6 +129,40 @@ describe('throwing', () => {
     const { events } = r.update(1 / 30, still);
     expect(events).toContainEqual({ type: 'mailbox' });
     expect(house.delivered).toBe(true);
+  });
+
+  it('scores nothing delivering to a mailbox after smashing that house\'s window', () => {
+    const r = make();
+    r.update(1 / 60, still);
+    const house = [...r.houses.values()].find((h) => h.spec.subscriber)!;
+
+    // First throw: smash the window.
+    r.rider.distance = house.spec.distance;
+    r.throwPaper();
+    let p = r.papers[0]!;
+    p.distance = house.spec.distance;
+    p.lateral = house.spec.windowLateral;
+    p.height = 0.01;
+    p.vHeight = -5;
+    p.vLateral = 0;
+    p.vDistance = 0;
+    const first = r.update(1 / 30, still);
+    expect(first.events).toContainEqual({ type: 'windowSubscriber' });
+    expect(house.resolved).toBe(true);
+
+    // Second throw at the same house: a mailbox hit that must NOT score,
+    // since the house was already cancelled by the broken window.
+    r.throwPaper();
+    p = r.papers[0]!;
+    p.distance = house.spec.distance;
+    p.lateral = house.spec.mailboxLateral;
+    p.height = 0.01;
+    p.vHeight = -5;
+    p.vLateral = 0;
+    p.vDistance = 0;
+    const second = r.update(1 / 30, still);
+    expect(second.events).toEqual([]);
+    expect(house.delivered).toBe(false);
   });
 
   it('never exceeds the paper cap when collecting a stack', () => {
@@ -214,7 +284,17 @@ describe('determinism', () => {
     const r = make(42);
     r.update(1 / 60, still);
     // Both apps call generateBlock(seed, index) from the shared package,
-    // so house ids must match exactly.
-    expect([...r.houses.keys()].some((id) => id.startsWith('h-0-'))).toBe(true);
+    // so block 0's houses -- ids AND seed-dependent fields -- must match
+    // the shared generator's output exactly, not merely share an id prefix
+    // that every seed would produce.
+    const expected = generateBlock(42, 0);
+    expect(expected.houses.length).toBeGreaterThan(0);
+    for (const spec of expected.houses) {
+      const runtime = r.houses.get(spec.id);
+      expect(runtime).toBeDefined();
+      expect(runtime!.spec.subscriber).toBe(spec.subscriber);
+      expect(runtime!.spec.mailboxLateral).toBe(spec.mailboxLateral);
+      expect(runtime!.spec.porchLateral).toBe(spec.porchLateral);
+    }
   });
 });
