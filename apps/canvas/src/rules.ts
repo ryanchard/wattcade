@@ -20,9 +20,11 @@ export const INVULNERABLE_S = 1.5;
 
 /**
  * Collision half-depth along the road, per hazard kind. These numbers are
- * HALF of the box `depth` the renderer actually draws — render/scene.ts's
- * `depth: item.hazard.spec.kind === 'car' ? 4 : 1` — so the hitbox agrees
- * with the sprite instead of being an independently guessed constant.
+ * HALF of the extent the renderer actually draws — render/entities.ts's
+ * `hazardDrawDepth`, `kind === 'car' ? 4 : 1` — so the hitbox agrees with
+ * the sprite instead of being an independently guessed constant. Every
+ * per-hazard draw function in that file is built to stay inside its own
+ * `hazardDrawDepth` along the street for exactly this reason.
  * Version B (apps/phaser/src/scenes/StreetScene.ts and views.ts) derives its
  * hazard zone from the identical `kind === 'car' ? 4 : 1` expression: if one
  * side's drawn depth changes, both this function and that expression must

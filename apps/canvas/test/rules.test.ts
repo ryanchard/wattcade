@@ -329,7 +329,7 @@ describe('collisions', () => {
 
   it('a car is 2.0 m deep to match its drawn box, wider hazards are not', () => {
     // Collision half-depth mirrors the box the renderer actually draws
-    // (render/scene.ts: depth 4 for a car, 1 for everything else), halved.
+    // (render/entities.ts hazardDrawDepth: 4 for a car, 1 otherwise), halved.
     // 2.0 m sits inside RIDER_HALF_LENGTH (0.75) + a car's half-depth (2.0)
     // = 2.75 m, but outside RIDER_HALF_LENGTH + a non-car half-depth (0.5)
     // = 1.25 m. Before this fix every hazard shared a single 0.6 m

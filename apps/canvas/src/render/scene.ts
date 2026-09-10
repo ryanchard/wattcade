@@ -1,47 +1,61 @@
-import { DEFAULT_ISO, worldToScreen } from '../iso.js';
+import { DEFAULT_ISO } from '../iso.js';
 import type { Camera, IsoConfig } from '../iso.js';
 import type { WorldState } from '../world.js';
 import { collectDrawables } from './drawables.js';
+import {
+  drawHazard, drawHouse, drawHouseGlow, drawPaper, drawRider, drawStack,
+  houseIsLit,
+} from './entities.js';
 import { PALETTE } from './palette.js';
-import { box, groundQuad, shadow } from './primitives.js';
+import { groundQuad } from './primitives.js';
 import type { DrawCtx } from './primitives.js';
 
-const HOUSE_WIDTH = 1.4;
-const HOUSE_DEPTH = 9;
-const HOUSE_HEIGHT = 3.2;
-
-/** Stable per-entity colour choice, so a house does not shimmer between frames. */
-function hashPick<T>(id: string, items: readonly T[]): T {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return items[h % items.length]!;
-}
-
-const HEX_COLOUR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+/**
+ * How far ahead and behind porch-light pools are painted. Much tighter than
+ * the entity cull: the projection is parallel, so a house 260 m up the street
+ * is drawn at full size but far off the right-hand edge of the screen, and
+ * every pool costs a gradient fill. This window covers everything that can
+ * actually be on screen.
+ */
+const GLOW_AHEAD_M = 140;
+const GLOW_BEHIND_M = 30;
 
 /**
- * Multiplies a hex colour's channels by `amount`. Hardened against the two
- * malformed inputs this codebase's own literals can produce: a short hex
- * like the hazard palette's '#999' fallback, and a non-finite `amount`.
- * Anything that isn't a well-formed 3- or 6-digit hex colour is returned
- * unchanged rather than turned into invalid CSS that canvas silently drops.
+ * Slack, in pixels, around the viewport for the off-screen test below. Wide
+ * enough to cover the tallest thing drawn (a house roof is ~80 px above its
+ * anchor) plus a porch-light pool's radius, so nothing pops in at an edge.
  */
-function shade(hex: string, amount: number): string {
-  const match = HEX_COLOUR.exec(hex);
-  if (match === null) return hex;
+const CULL_MARGIN_PX = 220;
 
-  const digits = match[1]!;
-  const expanded = digits.length === 3
-    ? digits.split('').map((c) => c + c).join('')
-    : digits;
-  const n = Number.parseInt(expanded, 16);
-  const safeAmount = Number.isFinite(amount) ? Math.max(0, Math.min(2, amount)) : 1;
+/**
+ * Half the widest a house's drawing reaches from its anchor: half the 9 m
+ * frontage, plus the eave overhang, plus the mailbox out at the kerb.
+ */
+const HOUSE_HALF_SPAN_M = 6.0;
 
-  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
-  const r = clamp(((n >> 16) & 255) * safeAmount);
-  const g = clamp(((n >> 8) & 255) * safeAmount);
-  const b = clamp((n & 255) * safeAmount);
-  return `rgb(${r}, ${g}, ${b})`;
+/**
+ * Is an entity's drawn extent entirely off the left or right of the screen?
+ *
+ * `collectDrawables` culls a generous 260 m ahead because it is a pure,
+ * camera-independent function — but the projection is parallel, so a house
+ * 260 m up the street is drawn at full size roughly 3400 px off the right
+ * edge. Two thirds of the sorted list is therefore invisible, and a house is
+ * now some thirty filled paths rather than one box. Skipping those here costs
+ * one multiply per entity and changes nothing about ordering: it removes
+ * entities from the frame, never reorders the ones that remain.
+ *
+ * X only, deliberately. Distance ahead moves an entity right AND up together
+ * in this projection, so the horizontal test already catches everything the
+ * vertical one would, and lateral spans at most 10 m (130 px) in total.
+ */
+function offScreenX(
+  d: DrawCtx, width: number,
+  distance: number, lateral: number, halfSpanM: number,
+): boolean {
+  const x = d.cfg.originX
+    + (lateral - (d.camera.distance - distance)) * (d.cfg.tileW / 2);
+  const reach = halfSpanM * (d.cfg.tileW / 2) + CULL_MARGIN_PX;
+  return x + reach < 0 || x - reach > width;
 }
 
 function drawSky(
@@ -68,70 +82,23 @@ function drawStreet(d: DrawCtx, w: WorldState): void {
   }
 }
 
-function drawHouse(d: DrawCtx, house: WorldState['houses'][number]): void {
-  // A hue difference, not just a brightness difference, so subscriber vs.
-  // non-subscriber houses are legible at speed even before the window or
-  // mailbox colour registers.
-  const wall = hashPick(
-    house.spec.id,
-    house.spec.subscriber ? PALETTE.houseWall : PALETTE.houseWallCool,
-  );
-  const roof = hashPick(`${house.spec.id}r`, PALETTE.houseRoof);
-  const lit = house.spec.subscriber && !house.windowBroken;
-
-  box(d, {
-    distance: house.spec.distance,
-    lateral: 0.75,
-    depth: HOUSE_DEPTH,
-    width: HOUSE_WIDTH,
-    height: HOUSE_HEIGHT,
-    top: roof,
-    left: shade(wall, lit ? 1.0 : 0.62),
-    right: shade(wall, lit ? 0.86 : 0.5),
-  });
-
-  // Window: lit and warm for a subscriber, dark once smashed.
-  const wx = worldToScreen(
-    house.spec.distance - 2.2, house.spec.windowLateral, 1.8,
-    d.camera, d.cfg,
-  );
-  d.ctx.fillStyle = house.windowBroken
-    ? '#1a1c26'
-    : lit ? PALETTE.subscriberGlow : '#3a4055';
-  d.ctx.fillRect(wx.x - 5, wx.y - 7, 10, 12);
-
-  // Mailbox at the kerbside edge of the lawn.
-  box(d, {
-    distance: house.spec.distance,
-    lateral: house.spec.mailboxLateral,
-    depth: 0.35,
-    width: 0.35,
-    height: house.delivered ? 0.7 : 1.0,
-    top: house.spec.subscriber
-      ? PALETTE.mailboxSubscriber
-      : PALETTE.mailboxPlain,
-    left: shade(house.spec.subscriber ? '#4f9dd6' : '#6b6b6b', 0.7),
-    right: shade(house.spec.subscriber ? '#4f9dd6' : '#6b6b6b', 0.55),
-  });
-}
-
-function drawRider(d: DrawCtx, w: WorldState): void {
-  const blink =
-    w.elapsed < w.rider.invulnerableUntil &&
-    Math.floor(w.elapsed * 12) % 2 === 0;
-  if (blink) return;
-
-  shadow(d, w.rider.distance, w.rider.lateral, 1.0);
-  box(d, {
-    distance: w.rider.distance,
-    lateral: w.rider.lateral,
-    depth: 1.5,
-    width: 0.6,
-    height: 1.7,
-    top: PALETTE.riderAccent,
-    left: PALETTE.rider,
-    right: shade('#e5533d', 0.75),
-  });
+/**
+ * The porch-light pass. Additive warm pools on the ground for every lit
+ * subscriber house, painted after the street and BEFORE the sorted entity
+ * loop — a pool drawn later would paint over whatever was standing in it.
+ * It is deliberately not part of the depth-sorted list: it is light on the
+ * ground plane, not an object with a footprint.
+ */
+function drawPorchGlow(d: DrawCtx, w: WorldState, width: number): void {
+  const lo = w.rider.distance - GLOW_BEHIND_M;
+  const hi = w.rider.distance + GLOW_AHEAD_M;
+  for (const house of w.houses) {
+    if (!houseIsLit(house)) continue;
+    const dist = house.spec.distance;
+    if (dist <= lo || dist >= hi) continue;
+    if (offScreenX(d, width, dist, 2.5, HOUSE_HALF_SPAN_M)) continue;
+    drawHouseGlow(d, house);
+  }
 }
 
 export function renderFrame(
@@ -151,48 +118,25 @@ export function renderFrame(
   const d: DrawCtx = { ctx, camera, cfg };
 
   drawStreet(d, w);
+  drawPorchGlow(d, w, width);
 
   for (const item of collectDrawables(w)) {
     switch (item.kind) {
       case 'house':
+        if (offScreenX(d, width, item.house.spec.distance, 0.75, HOUSE_HALF_SPAN_M)) break;
         drawHouse(d, item.house);
         break;
-      case 'hazard': {
-        const colour = PALETTE.hazard[item.hazard.spec.kind] ?? '#999';
-        shadow(d, item.hazard.distance, item.hazard.lateral, item.hazard.spec.width);
-        box(d, {
-          distance: item.hazard.distance,
-          lateral: item.hazard.lateral,
-          depth: item.hazard.spec.kind === 'car' ? 4 : 1,
-          width: item.hazard.spec.width,
-          height: item.hazard.spec.kind === 'drain' ? 0.1 : 1.2,
-          top: colour,
-          left: shade(colour, 0.72),
-          right: shade(colour, 0.56),
-        });
+      case 'hazard':
+        if (offScreenX(d, width, item.hazard.distance, item.hazard.lateral, 2.5)) break;
+        drawHazard(d, item.hazard, w.elapsed);
         break;
-      }
       case 'stack':
-        box(d, {
-          distance: item.stack.spec.distance,
-          lateral: item.stack.spec.lateral,
-          depth: 0.6, width: 0.6, height: 0.4,
-          top: PALETTE.paper,
-          left: shade('#f2ead9', 0.8),
-          right: shade('#f2ead9', 0.65),
-        });
+        if (offScreenX(d, width, item.stack.spec.distance, item.stack.spec.lateral, 1)) break;
+        drawStack(d, item.stack);
         break;
       case 'paper':
-        shadow(d, item.paper.distance, item.paper.lateral, 0.35);
-        box(d, {
-          distance: item.paper.distance,
-          lateral: item.paper.lateral,
-          depth: 0.3, width: 0.3, height: 0.18,
-          base: item.paper.height,
-          top: PALETTE.paper,
-          left: shade('#f2ead9', 0.82),
-          right: shade('#f2ead9', 0.68),
-        });
+        if (offScreenX(d, width, item.paper.distance, item.paper.lateral, 1)) break;
+        drawPaper(d, item.paper);
         break;
       case 'rider':
         drawRider(d, w);
