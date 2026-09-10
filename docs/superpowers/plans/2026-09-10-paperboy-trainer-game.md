@@ -6997,7 +6997,8 @@ function frame(now: number): void {
 }
 
 window.addEventListener('beforeunload', () => {
-  source?.setSimulation({ grade: 0, headwind: 0, crr: 0.004, cw: 0.51 });
+  // Best-effort only: beforeunload cannot await a Bluetooth write.
+  source?.setSimulation(FLAT_SIMULATION);
   void source?.stop();
 });
 
@@ -7749,6 +7750,14 @@ export interface RunInput {
   throwPaper: boolean;
 }
 
+/** Flat road: what the trainer gets whenever the rider is not actually riding. */
+export const FLAT_SIMULATION: SimulationParams = Object.freeze({
+  grade: 0,
+  headwind: 0,
+  crr: 0.004,
+  cw: 0.51,
+});
+
 export interface HouseRuntime {
   spec: HouseSpec;
   delivered: boolean;
@@ -7902,6 +7911,22 @@ export class PaperboyRun {
       crr: surfaceCrr(this.rider.lateral),
       cw: 0.51,
     };
+  }
+
+  /**
+   * The value the caller should actually send to the trainer this tick.
+   *
+   * `ControlPointWriter.setSimulation` does not write — it stores a pending
+   * value and flushes at most 4 Hz, so only the LAST value set before a flush
+   * reaches the device. That makes "send zero on the panic key" useless if any
+   * later call in the same tick overwrites it. So the panic key, pause and
+   * game-over do NOT send anything themselves: they change state, and this
+   * function decides the value. Callers make exactly ONE setSimulation call
+   * per tick, with this as its argument.
+   */
+  effectiveSimulation(): SimulationParams {
+    if (this.paused || this.gameOver) return FLAT_SIMULATION;
+    return this.simulation();
   }
 
   result(): RunResult {
@@ -8538,6 +8563,7 @@ import {
   FtmsSource, KeyboardSource, createWebBluetoothConnector,
 } from '@paperboy/trainer';
 import type { TrainerSource } from '@paperboy/trainer';
+import { FLAT_SIMULATION } from './logic/run.js';
 import { HudScene } from './scenes/HudScene.js';
 import { StreetScene } from './scenes/StreetScene.js';
 
@@ -8563,18 +8589,21 @@ const held = new Set<string>();
 
 window.addEventListener('keydown', (e) => {
   held.add(e.key);
-  if (e.key === ' ') {
-    street.setInput({ steer: readSteer(), throwPaper: true });
-    e.preventDefault();
-  }
+  if (e.key === ' ' || e.key.startsWith('Arrow')) e.preventDefault();
+
+  // OS auto-repeat fires a stream of keydowns while a key is held. Steering
+  // reads the held set so it is unaffected, but an edge-triggered throw would
+  // rapid-fire — which is the exact thing edge-triggering exists to prevent.
+  if (e.repeat) return;
+
+  if (e.key === ' ') street.setInput({ steer: readSteer(), throwPaper: true });
   if (e.key === 'p' || e.key === 'P') {
     if (street.run !== null) street.run.paused = !street.run.paused;
   }
-  if (e.key === 'Escape') {
-    source?.setSimulation({ grade: 0, headwind: 0, crr: 0.004, cw: 0.51 });
-    if (street.run !== null) street.run.paused = true;
-  }
-  if (e.key.startsWith('Arrow')) e.preventDefault();
+  // Escape does NOT write to the trainer here. It sets state; the single
+  // authoritative setSimulation below sends the flat value. Writing zero here
+  // would be overwritten by that call before the 4 Hz flush ever fired.
+  if (e.key === 'Escape' && street.run !== null) street.run.paused = true;
 });
 window.addEventListener('keyup', (e) => held.delete(e.key));
 window.addEventListener('blur', () => held.clear());
@@ -8586,7 +8615,9 @@ setInterval(() => {
   const run = street.run;
   if (run === null) return;
   street.setInput({ steer: readSteer(), throwPaper: false });
-  source?.setSimulation(run.simulation());
+  // Exactly one setSimulation per tick, and it must be the last word: the
+  // writer coalesces to the newest value, so an earlier zero would be lost.
+  source?.setSimulation(run.effectiveSimulation());
   if (run.gameOver) endRun();
 }, 1000 / 30);
 
@@ -8594,6 +8625,11 @@ async function useSource(next: TrainerSource): Promise<void> {
   await source?.stop();
   source = next;
   next.onSample((s) => street.run?.setPower(s.power));
+  next.onStatus((s) => {
+    // Without this the rider coasts forever on the last reading after a
+    // mid-ride disconnect, because samples simply stop arriving.
+    if (s.kind === 'disconnected' || s.kind === 'error') street.run?.setPower(0);
+  });
   await next.start();
 }
 
@@ -8642,6 +8678,9 @@ function endRun(): void {
   if (run === null) return;
   const result = run.result();
   const stats = recordRun(result, window.localStorage);
+  // Leave the trainer relaxed while the summary is up. Once street.run is
+  // null the interval above stops touching it entirely.
+  source?.setSimulation(FLAT_SIMULATION);
   street.run = null;
 
   panel.innerHTML = `
