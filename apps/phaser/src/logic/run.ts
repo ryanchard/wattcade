@@ -142,9 +142,16 @@ export class PaperboyRun {
     return true;
   }
 
-  /** Called by the scene when Arcade reports an overlap. */
+  /**
+   * Called by the scene when Arcade reports an overlap.
+   *
+   * Guarded on `paused` too, not just `gameOver`/`invulnerable`: the scene
+   * already skips calling this while paused (see StreetScene#update), but
+   * this is defence in depth so no future caller can crash a paused run by
+   * calling this directly.
+   */
   crash(): void {
-    if (this.gameOver || this.invulnerable) return;
+    if (this.gameOver || this.invulnerable || this.paused) return;
     this.rider.lives -= 1;
     this.rider.speed *= 0.15;
     this.rider.invulnerableUntil = this.elapsed + INVULNERABLE_S;

@@ -146,12 +146,20 @@ export class StreetScene extends Phaser.Scene {
       this.#statics.delete(id);
     }
 
-    this.#moveHazards(run, frameDt);
+    // A paused run's own update() already no-ops (see PaperboyRun.update),
+    // but hazard motion and collision live here in the scene, outside that
+    // guard — without this check an oncoming car kept driving into a
+    // stationary, panic-stopped rider and could still cost a life. Version
+    // A never had this bug because moveHazards lives inside stepWorld,
+    // which returns early while paused.
+    if (!run.paused) {
+      this.#moveHazards(run, frameDt);
+      this.#checkCollisions(run);
+    }
     this.#syncHazardLooks(run);
     this.#syncPapers(run);
     this.#drawGround(run);
     this.#syncPositions(run);
-    this.#checkCollisions(run);
   }
 
   #place(

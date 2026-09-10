@@ -203,6 +203,23 @@ describe('crashing', () => {
     expect(r.rider.lives).toBe(START_LIVES - 1);
   });
 
+  it('costs no life for a paused run with a rider parked on a hazard', () => {
+    // The real collision check (StreetScene#checkCollisions) needs a live
+    // Phaser Scene and can't run headlessly here (see
+    // apps/phaser/test/hazardActive.test.ts), and StreetScene#update
+    // already skips calling #checkCollisions at all while paused — so an
+    // oncoming car can no longer even reach this method while the rider is
+    // panic-stopped. This pins the defence-in-depth layer directly: even
+    // if some future caller invoked crash() on a paused run (a rider
+    // sitting motionless on top of a still-active hazard, say), it must
+    // still cost no life.
+    const r = make();
+    r.paused = true;
+    r.crash();
+    expect(r.rider.lives).toBe(START_LIVES);
+    expect(r.gameOver).toBe(false);
+  });
+
   it('ends the run when the last life goes', () => {
     const r = make();
     for (let i = 0; i < START_LIVES; i++) {
