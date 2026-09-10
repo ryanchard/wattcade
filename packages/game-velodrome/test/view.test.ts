@@ -1,33 +1,102 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_RIDER } from '@paperboy/trainer';
+import { createRace } from '../src/race.js';
+import type { RaceState } from '../src/race.js';
+import { CHAMPION } from '../src/rivals.js';
 import {
-  PX_PER_M_MAX, PX_PER_M_MIN, pointOnOval, targetScale,
+  PX_PER_M_MAX, PX_PER_M_MIN, SCROLL_PX_PER_M, ZOOM_KNEE_M,
+  createRenderState, pointOnOval, targetScale, updateRenderState,
 } from '../src/render.js';
 
 /**
  * Only the pure geometry the view is built on. Drawing itself is not tested —
- * but a camera that does not pull back, or an oval that is not a loop, are
- * arithmetic mistakes rather than taste, and they are cheap to catch.
+ * but a camera that pulls the world's speed around with it, or an oval that
+ * is not a loop, are arithmetic mistakes rather than taste, and they are
+ * cheap to catch.
  */
 
+const WIDTH = 1400;
+const HEIGHT = 800;
+
+function raceAt(gap: number, speed: number): RaceState {
+  const s = createRace({ ...DEFAULT_RIDER, ftpWatts: 240 }, CHAMPION);
+  s.gap = gap;
+  s.player.speed = speed;
+  s.player.powerCurrent = 300;
+  return s;
+}
+
 describe('the camera', () => {
-  it('stays at full zoom while the riders are together', () => {
-    expect(targetScale(0, 1400)).toBe(PX_PER_M_MAX);
-    expect(targetScale(2, 1400)).toBe(PX_PER_M_MAX);
+  it('stays at full zoom while the riders are racing each other', () => {
+    expect(targetScale(0, WIDTH)).toBe(PX_PER_M_MAX);
+    expect(targetScale(2, WIDTH)).toBe(PX_PER_M_MAX);
+    expect(targetScale(15, WIDTH)).toBe(PX_PER_M_MAX);
   });
 
-  it('pulls back as the gap opens, so nobody leaves the frame', () => {
-    const near = targetScale(10, 1400);
-    const far = targetScale(60, 1400);
+  it('eases back once the gap is properly open', () => {
+    const near = targetScale(ZOOM_KNEE_M, WIDTH);
+    const far = targetScale(60, WIDTH);
     expect(far).toBeLessThan(near);
-    expect(60 * far).toBeLessThan(1400);
   });
 
-  it('never zooms below the floor', () => {
-    expect(targetScale(100000, 1400)).toBe(PX_PER_M_MIN);
+  it('never pulls back past two thirds of full scale', () => {
+    expect(targetScale(100, WIDTH)).toBe(PX_PER_M_MIN);
+    expect(targetScale(100000, WIDTH)).toBe(PX_PER_M_MIN);
+    // The whole point: the world stays close to life size, and a rival past
+    // what the frame holds is handled by the edge marker instead.
+    expect(PX_PER_M_MIN / PX_PER_M_MAX).toBeGreaterThanOrEqual(2 / 3);
+  });
+
+  it('never zooms back in as the gap grows', () => {
+    let previous = targetScale(0, WIDTH);
+    for (let gap = 0; gap <= 400; gap += 5) {
+      const scale = targetScale(gap, WIDTH);
+      expect(scale).toBeLessThanOrEqual(previous + 1e-9);
+      previous = scale;
+    }
   });
 
   it('is symmetric — being 40 m down looks like being 40 m up', () => {
-    expect(targetScale(-40, 1400)).toBe(targetScale(40, 1400));
+    expect(targetScale(-40, WIDTH)).toBe(targetScale(40, WIDTH));
+  });
+});
+
+describe('the ground', () => {
+  /**
+   * THE REGRESSION GUARD. The boards used to scroll at `speed * scale`, so
+   * opening a gap zoomed the camera out and slowed the whole world down: the
+   * better you rode, the slower it looked. Ground scroll is now a function of
+   * metres ridden and nothing else.
+   */
+  it('scrolls at the same rate per metre ridden whatever the gap', () => {
+    const speed = 16;
+    const dt = 0.1;
+    const scrolls = [0, 50, 100, 200, 400].map((gap) => {
+      const r = createRenderState();
+      const s = raceAt(gap, speed);
+      let scrolled = 0;
+      let previous = r.scroll;
+      for (let i = 0; i < 20; i++) {
+        updateRenderState(r, s, WIDTH, HEIGHT, dt);
+        scrolled += r.scroll - previous;
+        previous = r.scroll;
+      }
+      return scrolled;
+    });
+
+    const together = scrolls[0]!;
+    // Twenty steps at 16 m/s is 32 m of track, at the fixed reference.
+    expect(together).toBeCloseTo(32 * SCROLL_PX_PER_M, 6);
+    for (const scrolled of scrolls) expect(scrolled).toBeCloseTo(together, 6);
+  });
+
+  it('scrolls in proportion to speed', () => {
+    const step = (speed: number): number => {
+      const r = createRenderState();
+      updateRenderState(r, raceAt(0, speed), WIDTH, HEIGHT, 0.1);
+      return r.scroll;
+    };
+    expect(step(20)).toBeCloseTo(step(10) * 2, 6);
   });
 });
 

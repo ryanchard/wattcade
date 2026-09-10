@@ -1,17 +1,22 @@
-import { INK, KIT, PALETTE } from './palette.js';
+import { DISPLAY_FONT, INK, KIT, PALETTE } from './palette.js';
 import {
   LAP_LENGTH_M, RACE_DISTANCE_M, lapPhase,
 } from './race.js';
 import type { RaceState } from './race.js';
+import { drawTabular } from './text.js';
 
 /**
  * The velodrome, side-on, riders travelling right.
  *
  * Two rules govern everything here.
  *
- * 1. THE GAP IS LITERAL SCREEN DISTANCE. The rival's position on screen is
- *    the gap, to scale. The picture IS the information; the number in the HUD
- *    is a courtesy.
+ * 1. THE GAP IS LITERAL SCREEN DISTANCE, and SPEED IS LITERAL SCREEN SPEED.
+ *    The rival's position on screen is the gap, to scale, and the boards go
+ *    past at a fixed number of pixels per metre RIDDEN — never at the
+ *    camera's scale. Sixty km/h looks like sixty km/h whether the rival is on
+ *    your wheel or a hundred metres up the road. When the rival runs out of
+ *    frame the camera does NOT keep pulling back; they are pinned to the edge
+ *    with a chevron and the metres beside it.
  *
  * 2. THE WIND IS VISIBLE. Out in the wind the screen streams with air and the
  *    rider works visibly harder. In the shelter it goes quiet: clean boards,
@@ -27,21 +32,47 @@ import type { RaceState } from './race.js';
 /** Pixels per metre when the riders are together. A rider is ~1.75 m long,
  * so this makes a bike about 52 px — big enough to read at a glance. */
 export const PX_PER_M_MAX = 30;
-/** Floor, so a rival a hundred metres up the road is still a shape and not a
- * single pixel. Below this the oval track map carries the information. */
-export const PX_PER_M_MIN = 2.6;
-/** The player sits here across the screen and stays there. A rider breathing
- * hard should not also be tracking their own avatar around the frame. */
-export const PLAYER_ANCHOR = 0.40;
-/** How much of the width the gap is allowed to fill before the view pulls
- * back. Zooming out is itself the message: they are gone. */
+/** The camera never pulls back further than two thirds of full scale. Past
+ * that, zooming out costs the whole world its sense of speed and buys only a
+ * smaller rival; the edge marker says "they are gone" for free. */
+export const PX_PER_M_MIN = 20;
+/** Riders inside this many metres of each other are shown at full scale: a
+ * sprint's worth of racing happens here and it should never breathe. */
+export const ZOOM_KNEE_M = 25;
+/** The pull-back is complete by knee × this. Past it the scale is pinned. */
+const ZOOM_RAMP_RATIO = 3.2;
+/** How much of the width the gap may fill before the knee is brought in, so
+ * a narrow canvas starts easing sooner than a wide one. */
 export const GAP_SCREEN_SHARE = 0.46;
 /** Seconds for the zoom to settle, so the scale never pops. */
 const SCALE_TAU_S = 0.7;
 
+/**
+ * The ground and everything parallaxed off it scroll at THIS, always —
+ * deliberately not at `scale`. Tying the world's speed to the camera made
+ * riding well look slow, which is exactly backwards in a sprint game.
+ */
+export const SCROLL_PX_PER_M = PX_PER_M_MAX;
+
+/** Scroll wraps here, far enough out that the wrap is never in shot. */
+const SCROLL_WRAP = 16800;
+
+/** The player sits here across the screen and stays there. A rider breathing
+ * hard should not also be tracking their own avatar around the frame. */
+export const PLAYER_ANCHOR = 0.40;
+
+/**
+ * Full scale until the riders are properly apart, then a small bounded ease
+ * back to PX_PER_M_MIN and no further.
+ */
 export function targetScale(gapM: number, width: number): number {
-  const span = Math.max(1, Math.abs(gapM));
-  return Math.min(PX_PER_M_MAX, Math.max(PX_PER_M_MIN, (GAP_SCREEN_SHARE * width) / span));
+  const span = Math.abs(gapM);
+  const knee = Math.max(1, Math.min(ZOOM_KNEE_M, (GAP_SCREEN_SHARE * width) / PX_PER_M_MAX));
+  // Written as a negated comparison so a NaN gap holds full scale.
+  if (!(span > knee)) return PX_PER_M_MAX;
+  const t = Math.min(1, (span - knee) / (knee * (ZOOM_RAMP_RATIO - 1)));
+  const eased = t * t * (3 - 2 * t);
+  return PX_PER_M_MAX + (PX_PER_M_MIN - PX_PER_M_MAX) * eased;
 }
 
 // --- streaming air --------------------------------------------------------
@@ -97,7 +128,8 @@ export function updateRenderState(
   r.scale += (want - r.scale) * (1 - Math.exp(-dt / SCALE_TAU_S));
 
   const speed = s.player.speed;
-  r.scroll = (r.scroll + speed * r.scale * dt) % 4096;
+  // Metres ridden, at a fixed pixels-per-metre. Independent of the camera.
+  r.scroll = (r.scroll + speed * SCROLL_PX_PER_M * dt) % SCROLL_WRAP;
   r.wheelPhase = (r.wheelPhase + (speed / WHEEL_RADIUS_M) * dt) % (Math.PI * 2);
   // A track rider turns a big gear fast; tie the stroke to speed so the legs
   // and the boards agree with each other.
@@ -124,7 +156,8 @@ export function updateRenderState(
         len: 40 + Math.random() * 190,
         life: 0,
         maxLife: STREAK_LIFE_S * (0.6 + Math.random() * 0.8),
-        vx: -(speed * r.scale * (1.15 + Math.random() * 0.9)),
+        // Air moves with the ground, at the ground's fixed scale.
+        vx: -(speed * SCROLL_PX_PER_M * (1.15 + Math.random() * 0.9)),
       });
     }
   } else {
@@ -533,32 +566,67 @@ export function renderScene(
   const rivalKit = { body: KIT.rivalBody, accent: KIT.rivalAccent };
   const playerKit = { body: KIT.playerBody, accent: KIT.playerAccent };
   const rivalStrain = s.rival.drafting ? 0.25 : 0.75;
-  const clampedRivalX = Math.max(-w * 0.2, Math.min(w * 1.2, rivalX));
+  // Swap the rider for the edge marker just before they would be clipped.
+  const margin = w * 0.045;
+  const clampedRivalX = Math.max(margin, Math.min(w - margin, rivalX));
+  const offFrame = rivalX < margin || rivalX > w - margin;
 
   if (rivalX < anchor) {
-    drawRider(c, clampedRivalX, y, r.scale, rivalKit, r, rivalStrain, s.rival.drafting);
+    if (!offFrame) {
+      drawRider(c, clampedRivalX, y, r.scale, rivalKit, r, rivalStrain, s.rival.drafting);
+    }
     drawRider(c, anchor, y, r.scale, playerKit, r, r.strain, s.player.drafting);
   } else {
     drawRider(c, anchor, y, r.scale, playerKit, r, r.strain, s.player.drafting);
-    drawRider(c, clampedRivalX, y, r.scale, rivalKit, r, rivalStrain, s.rival.drafting);
+    if (!offFrame) {
+      drawRider(c, clampedRivalX, y, r.scale, rivalKit, r, rivalStrain, s.rival.drafting);
+    }
   }
 
   drawStreaks(c, r, 1);
 
-  // If the rival is off the edge of the world, say which edge.
-  if (rivalX < -20 || rivalX > w + 20) {
-    const right = rivalX > 0;
-    const cx = right ? w - 26 : 26;
-    c.fillStyle = KIT.rivalAccent;
+  // Out of frame is not a reason to shrink the world. Pin them to the edge
+  // and say, in metres, how far past it they are.
+  if (offFrame) drawEdgeMarker(c, s.gap, rivalX > anchor, w, y);
+
+  drawVignette(c, w, h);
+}
+
+/**
+ * The rival, off the edge of the world: a chevron pointing the way they went
+ * and the gap in metres beside it, in their own colour.
+ */
+function drawEdgeMarker(
+  c: CanvasRenderingContext2D, gapM: number, ahead: boolean, w: number, y: number,
+): void {
+  const dir = ahead ? 1 : -1;
+  const edge = ahead ? w - 14 : 14;
+  const unit = Math.max(14, w / 64);
+  const top = y - unit * 2.6;
+
+  c.save();
+  // A slab of the arena behind it, so the number never fights the boards.
+  c.fillStyle = 'rgba(7, 11, 14, 0.62)';
+  c.fillRect(ahead ? w - unit * 5.6 : 0, top - unit * 1.5, unit * 5.6, unit * 3.4);
+
+  c.fillStyle = KIT.rivalAccent;
+  for (let i = 0; i < 2; i++) {
+    const cx = edge - dir * i * unit * 0.62;
     c.beginPath();
-    c.moveTo(cx + (right ? 10 : -10), y - 24);
-    c.lineTo(cx + (right ? -8 : 8), y - 40);
-    c.lineTo(cx + (right ? -8 : 8), y - 8);
+    c.moveTo(cx, top);
+    c.lineTo(cx - dir * unit * 0.5, top - unit * 0.62);
+    c.lineTo(cx - dir * unit * 0.5, top + unit * 0.62);
     c.closePath();
     c.fill();
   }
 
-  drawVignette(c, w, h);
+  const metres = Math.round(Math.abs(gapM));
+  c.fillStyle = INK.text;
+  drawTabular(
+    c, `${metres}`, ahead ? w - unit * 0.6 : unit * 0.6, top + unit * 1.75,
+    `800 ${unit * 1.7}px ${DISPLAY_FONT}`, ahead ? 'right' : 'left',
+  );
+  c.restore();
 }
 
 function drawStreaks(c: CanvasRenderingContext2D, r: RenderState, layer: number): void {
