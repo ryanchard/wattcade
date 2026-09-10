@@ -7,10 +7,9 @@
  * derived from real frame time and never fed back into the simulation.
  */
 import type {
-  GameCreateOptions, GameModule, GameSession, HudLine, RunResult,
+  GameCreateOptions, GameModule, GameSession, HudLine, RiderProfile, RunResult,
   SimulationParams,
 } from '@paperboy/game-api';
-import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
 import { poster } from './poster.js';
 import { createRenderState, renderScene, updateRenderState } from './render.js';
@@ -78,6 +77,10 @@ class PackSession implements GameSession {
       lines: [
         { label: 'dogs shaken', value: String(r.dogsShaken) },
         { label: 'still on you at the end', value: String(this.#session.dogs) },
+        {
+          label: 'battery left',
+          value: `${Math.round(r.batteryLeft * 100)}% of your store`,
+        },
       ],
       durationS: r.durationMs / 1000,
       distanceM: r.distanceM,

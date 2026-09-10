@@ -1,4 +1,8 @@
-import type { RiderProfile, SimulationParams } from '@paperboy/trainer';
+import type { RiderProfile, SimulationParams } from '@paperboy/game-api';
+import {
+  advanceWPrime, createWPrime, criticalPower, sustainablePower, wPrimeFraction,
+} from '@paperboy/game-core';
+import type { WPrimeState } from '@paperboy/game-core';
 import { clampGrade, stepPhysics } from '@paperboy/trainer';
 
 // ---------------------------------------------------------------------------
@@ -83,6 +87,13 @@ export interface Session {
   shakeHoldS: number;
   powerTarget: number;
   powerCurrent: number;
+  /** What the legs actually produced: `powerCurrent` after the anaerobic
+   * store has had its say. Drives the physics and the shake test, so an
+   * empty rider cannot throw a dog however hard they are pushing. */
+  powerEffective: number;
+  /** The anaerobic store, and the line it is spent above. */
+  wPrime: WPrimeState;
+  criticalPowerW: number;
   kilojoules: number;
   paused: boolean;
   /** True once the pack has caught the rider, or the rider has hit the
@@ -108,6 +119,9 @@ export function createSession(profile: RiderProfile): Session {
     shakeHoldS: 0,
     powerTarget: 0,
     powerCurrent: 0,
+    powerEffective: 0,
+    wPrime: createWPrime(profile),
+    criticalPowerW: criticalPower(profile),
     kilojoules: 0,
     paused: false,
     caught: false,
@@ -126,6 +140,27 @@ export function setPower(s: Session, watts: number | null): void {
 /** The shake threshold in watts for this rider's FTP. */
 export function shakeThreshold(profile: RiderProfile): number {
   return profile.ftpWatts * SHAKE_POWER_FRACTION_OF_FTP;
+}
+
+/**
+ * WHAT ONE DOG COSTS, in joules out of the anaerobic store.
+ *
+ * A shake is SHAKE_HOLD_DURATION_S seconds at SHAKE_POWER_FRACTION_OF_FTP,
+ * and the part of that above critical power has to be paid for out of the
+ * same battery the velodrome runs on. For a 235 W rider that is 282 J a shake
+ * against a 22 kJ store — cheap on its own, which is right, because the real
+ * cost is the riding between the shakes: every dog on you is another 1.2% of
+ * grade, and holding the pack off with four of them attached is well above
+ * threshold before you try to throw any of them.
+ *
+ * That is what turns "about ten shakes" into a budget rather than a habit.
+ * The threshold is tested against the power the legs ACTUALLY produce, so a
+ * rider who has emptied the store cannot reach it however hard they push:
+ * the dogs stay on, the road tilts up, and the run ends.
+ */
+export function shakeCostJoules(profile: RiderProfile): number {
+  return Math.max(0, shakeThreshold(profile) - criticalPower(profile))
+    * SHAKE_HOLD_DURATION_S;
 }
 
 /** Pure gap update: grows while the rider outpaces the pack, shrinks when
@@ -165,13 +200,21 @@ export function advance(s: Session, dt: number): void {
   // from lurching once per notification.
   const alpha = 1 - Math.exp(-dt / POWER_TAU_S);
   s.powerCurrent += (s.powerTarget - s.powerCurrent) * alpha;
+  // The power meter recorded what the legs did, whatever the store had left
+  // to turn it into speed, so the results card reads the honest figure.
   s.kilojoules += (s.powerCurrent * dt) / 1000;
+
+  // What actually reaches the road, and what the store is debited for.
+  s.powerEffective = sustainablePower(
+    s.powerCurrent, s.criticalPowerW, wPrimeFraction(s.wPrime),
+  );
+  advanceWPrime(s.wPrime, s.powerEffective, s.criticalPowerW, dt);
 
   const grade = clampGrade(gradePercentFor(s.dogs));
   const crr = crrFor(s.profile, s.dogs);
   const next = stepPhysics(
     { speed: s.speed, distance: s.distance },
-    { powerWatts: s.powerCurrent, gradePercent: grade, crr, headwind: 0 },
+    { powerWatts: s.powerEffective, gradePercent: grade, crr, headwind: 0 },
     s.profile,
     dt,
   );
@@ -194,7 +237,7 @@ export function advance(s: Session, dt: number): void {
     s.shakeHoldS = 0;
   }
 
-  if (s.dogs > 0 && s.powerCurrent >= shakeThreshold(s.profile)) {
+  if (s.dogs > 0 && s.powerEffective >= shakeThreshold(s.profile)) {
     s.shakeHoldS += dt;
     if (s.shakeHoldS >= SHAKE_HOLD_DURATION_S) {
       s.dogs -= 1;
@@ -258,6 +301,8 @@ export interface PackRunResult {
   durationMs: number;
   dogsShaken: number;
   avgPower: number;
+  /** What was left of the anaerobic store when the pack caught you, 0..1. */
+  batteryLeft: number;
 }
 
 export function toRunResult(s: Session): PackRunResult {
@@ -267,5 +312,6 @@ export function toRunResult(s: Session): PackRunResult {
     durationMs: Math.round(seconds * 1000),
     dogsShaken: s.dogsShaken,
     avgPower: seconds > 0 ? Math.round((s.kilojoules * 1000) / seconds) : 0,
+    batteryLeft: wPrimeFraction(s.wPrime),
   };
 }
