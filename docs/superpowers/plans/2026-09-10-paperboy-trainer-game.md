@@ -8297,7 +8297,11 @@ export class StreetScene extends Phaser.Scene {
     drawRiderView(riderGraphics);
     this.#rider = this.add.container(0, 0, [riderGraphics]);
 
-    this.#riderZone = this.add.zone(0, 0, 0.8 * PX_PER_M, 1.5 * PX_PER_M);
+    // 1.5 m LONG (X, along travel) by 0.8 m WIDE (Y, across the street) --
+    // matching Version A's RIDER_HALF_LENGTH 0.75 / RIDER_HALF_WIDTH 0.4 and
+    // the drawn bike. Swapping these makes the rider clip things that visibly
+    // miss them sideways while cars become far harder to graze.
+    this.#riderZone = this.add.zone(0, 0, 1.5 * PX_PER_M, 0.8 * PX_PER_M);
     this.physics.add.existing(this.#riderZone);
   }
 
@@ -8386,6 +8390,9 @@ export class StreetScene extends Phaser.Scene {
     drawHazardView(g, spec);
     const container = this.add.container(0, 0, [g]);
 
+    // Body space: X is DISTANCE along the street, Y is LATERAL across it
+    // (see toBodyX/toBodyY). Zone's third argument is width = the X extent,
+    // so depth-along-travel comes first and cross-street width second.
     const zone = this.add.zone(
       toBodyX(spec.distance),
       toBodyY(spec.lateral),
