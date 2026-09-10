@@ -9,6 +9,7 @@
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
+    "noEmit": true,
     "types": ["web-bluetooth"]
   }
 }

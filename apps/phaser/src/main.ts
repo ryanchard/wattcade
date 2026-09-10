@@ -97,6 +97,7 @@ function showMenu(): void {
       <button id="daily">Daily route</button>
       <button id="start">Ride</button>
     </p>
+    <p class="dim">Chrome or Edge only. Close Zwift and the Wahoo app first.</p>
   `;
   overlay.hidden = false;
 
