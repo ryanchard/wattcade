@@ -13,6 +13,7 @@ import type {
 } from '@paperboy/game-api';
 import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
+import { poster } from './poster.js';
 import { createRenderState, renderScene, updateRenderState } from './render.js';
 import type { RenderState } from './render.js';
 import {
@@ -100,10 +101,14 @@ export const spincycle: GameModule = {
     '80 rpm to hold level — and ride harder to go further, faster.',
   // Flat road, thin air, on purpose. Read-only trainers play this in full.
   needsResistance: false,
+  // Cadence IS the steering. A trainer that reports watts and no cadence
+  // cannot fly this at all, and the hub says so before the rider starts.
+  needsCadence: true,
   controls: [],
   // A sunlit English afternoon: pale sky, brass and canvas, a hedgerow.
   palette: { base: '#bcdff2', accent: '#c98a3c', detail: '#78975b' },
   usesSeed: true,
+  poster,
   create(opts: GameCreateOptions): GameSession {
     return new SpinCycleSession(opts.profile, opts.seed ?? 1);
   },

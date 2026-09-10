@@ -42,6 +42,24 @@ const PACK_COLOUR = '#0d0f18';
 const PACK_DUST = 'rgba(13, 15, 24, 0.35)';
 const GAP_ROAD_LINE = 'rgba(242, 234, 217, 0.18)';
 
+/**
+ * The scene's colours, grouped and exported so the game's poster is drawn
+ * from the same decisions the scene is. Nothing new is picked here — a
+ * poster that invented its own blue would start lying the first time this
+ * file was re-graded.
+ */
+export const POSTER_SKY = { top: SKY_TOP, horizon: SKY_HORIZON } as const;
+
+export const POSTER_INK = {
+  groundFar: GROUND_FAR,
+  groundNear: GROUND_NEAR,
+  silhouette: SILHOUETTE,
+  riderAccent: RIDER_ACCENT,
+  dogOnRider: DOG_ON_RIDER,
+  dust: PACK_DUST,
+  roadLine: GAP_ROAD_LINE,
+} as const;
+
 export interface RenderState {
   scrollFar: number;
   scrollMid: number;

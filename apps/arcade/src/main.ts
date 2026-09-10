@@ -1,5 +1,5 @@
 /**
- * The arcade: one page, one trainer connection, three games.
+ * Wattcade: one page, one trainer connection, five games.
  *
  * This is the only file in the project that touches Bluetooth, the DOM and
  * `requestAnimationFrame`. Everything it decides — what the trainer is told,
@@ -17,14 +17,21 @@ import { CATALOG, gameById } from './catalog.js';
 import { renderHub, resultsCard } from './hub.js';
 import type { HubGame } from './hub.js';
 import { createInput } from './input.js';
+import { paintPoster } from './poster.js';
 import { loadProfile, saveProfile, withEntries } from './profile.js';
 import {
   FLAT_SIMULATION, clearRide, createRide, finishRide, releaseRide, setHidden,
   setCadence, setPower, startRide, stopRide, tickRide, togglePaused,
 } from './ride.js';
+import {
+  loadBoards, loadInitials, normaliseInitials, recordScore, renameEntry,
+  saveInitials,
+} from './scores.js';
 import { loadStats, recordRun } from './stats.js';
-import { describeTrainer } from './trainerStatus.js';
-import type { TrainerView } from './trainerStatus.js';
+import {
+  cadenceState, createCadenceWatch, describeTrainer, noteCadence,
+} from './trainerStatus.js';
+import type { CadenceWatch, TrainerView } from './trainerStatus.js';
 
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLDivElement;
@@ -37,6 +44,13 @@ const input = createInput(window);
 
 let source: TrainerSource | null = null;
 let trainer: TrainerView = describeTrainer(null, null);
+/**
+ * Whether this trainer reports cadence. Reset with the source, because it is
+ * a fact about the machine currently on the other end and not about the page.
+ */
+let cadence: CadenceWatch = createCadenceWatch();
+/** The cabinet only comes on once, however many times the hub is redrawn. */
+let introDone = false;
 
 let profile: RiderProfile = loadProfile(store);
 let seedText = '';
@@ -60,7 +74,12 @@ function resize(): void {
   canvas.style.height = `${height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => {
+  resize();
+  // The cards are fluid, so their art is redrawn at the new size rather than
+  // stretched. Only when the hub is the thing on screen.
+  if (ride.session === null && !overlay.hidden) paintPosters();
+});
 resize();
 
 // --- the trainer ----------------------------------------------------------
@@ -73,6 +92,7 @@ resize();
 async function useSource(next: TrainerSource): Promise<void> {
   const previous = source;
   source = next;
+  cadence = createCadenceWatch();
   if (previous !== null) {
     previous.setSimulation(FLAT_SIMULATION);
     await previous.stop();
@@ -93,6 +113,9 @@ async function useSource(next: TrainerSource): Promise<void> {
   next.onSample((sample) => {
     setPower(ride, sample.power);
     setCadence(ride, sample.cadence);
+    // Watched so the hub can warn, on the cards that are steered by it, that
+    // this trainer has been asked for cadence and has not answered.
+    noteCadence(cadence, sample.cadence);
   });
   await next.start();
 }
@@ -107,16 +130,34 @@ function hubGames(): readonly HubGame[] {
 }
 
 function showHub(): void {
-  sheet.className = 'sheet hub';
+  sheet.className = introDone ? 'sheet hub' : 'sheet hub intro';
+  introDone = true;
   sheet.innerHTML = renderHub({
     trainer,
+    cadence: cadenceState(cadence),
     profile,
     stats: loadStats(store),
+    scores: loadBoards(store),
     games: hubGames(),
     seed: seedText,
   });
   overlay.hidden = false;
   wireHub();
+  paintPosters();
+}
+
+/**
+ * Each card's art, drawn by the game that owns it at whatever size the
+ * layout ended up giving the card. Nothing is cached: a poster is a few
+ * dozen fills, it is drawn five times when the hub appears and on a resize,
+ * and a stale bitmap would be a worse trade than redrawing it.
+ */
+function paintPosters(): void {
+  const canvases = sheet.querySelectorAll<HTMLCanvasElement>('canvas[data-poster]');
+  for (const node of Array.from(canvases)) {
+    const game = gameById(node.dataset['poster'] ?? '');
+    if (game !== null) paintPoster(node, game, window.devicePixelRatio || 1);
+  }
 }
 
 function commitProfile(): void {
@@ -189,6 +230,14 @@ function variantName(game: GameModule, id: string): string | null {
 
 function showResults(game: GameModule, result: RunResult): void {
   recordRun(store, game.id, result);
+
+  // The run goes on the board under the initials used last, and the card can
+  // then say where it landed. The rider corrects the initials afterwards if
+  // they are not theirs — which is the order an arcade does it in, and the
+  // only order in which the place is news.
+  const at = Date.now();
+  const posted = recordScore(store, game.id, loadInitials(store), result, at);
+
   const nextId = result.nextVariantId ?? null;
   sheet.className = 'sheet card-only';
   sheet.innerHTML = resultsCard({
@@ -196,9 +245,12 @@ function showResults(game: GameModule, result: RunResult): void {
     result,
     nextId,
     nextName: nextId === null ? null : variantName(game, nextId),
+    place: posted.place,
+    initials: posted.entry?.initials ?? loadInitials(store),
   });
   overlay.hidden = false;
   input.setCapturing(false);
+  wireInitials(game.id, at);
 
   document.getElementById('again')?.addEventListener('click', () => {
     const start = lastStart;
@@ -213,6 +265,35 @@ function showResults(game: GameModule, result: RunResult): void {
     clearRide(ride);
     showHub();
   });
+}
+
+/**
+ * The three-letter box on the results card.
+ *
+ * Keystrokes are stopped here rather than allowed to reach the shell: P is a
+ * perfectly good initial, and a rider typing their name should not pause a
+ * run that has already finished.
+ */
+function wireInitials(gameId: string, at: number): void {
+  const box = document.getElementById('initials') as HTMLInputElement | null;
+  if (box === null) return;
+  box.addEventListener('keydown', (e) => { e.stopPropagation(); });
+  box.addEventListener('input', () => {
+    const typed = box.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    if (typed !== box.value) box.value = typed;
+    if (typed === '') return;
+    saveInitials(store, typed);
+    renameEntry(store, gameId, at, typed);
+  });
+  // An emptied box is not a rider asking to be anonymous; it is a rider
+  // part-way through retyping. Put the board's own default back.
+  box.addEventListener('change', () => {
+    if (box.value !== '') return;
+    box.value = normaliseInitials('').trim();
+    saveInitials(store, box.value);
+    renameEntry(store, gameId, at, box.value);
+  });
+  box.select();
 }
 
 // --- the loop -------------------------------------------------------------

@@ -37,6 +37,27 @@ const PLAYER_X_FRACTION = 0.3;
 /** Light from above: shafts that drift rather than scroll with the world. */
 const SHAFTS = 6;
 
+/**
+ * The scene's colours, grouped and exported so the game's poster is drawn
+ * from the same decisions the sea is, and re-grades with it.
+ */
+export const POSTER_WATER = {
+  top: WATER_TOP, mid: WATER_MID, deep: WATER_DEEP, seabed: SEABED,
+} as const;
+
+export const POSTER_INK = {
+  playerBody: PLAYER_BODY,
+  playerFin: PLAYER_FIN,
+  preyBody: PREY_BODY,
+  preyFin: PREY_FIN,
+  predatorBody: PREDATOR_BODY,
+  predatorFin: PREDATOR_FIN,
+  predatorEdge: PREDATOR_EDGE,
+  eyeWhite: EYE_WHITE,
+  eyeDark: EYE_DARK,
+  biolum: BIOLUM,
+} as const;
+
 export interface Bubble {
   x: number;
   y: number;

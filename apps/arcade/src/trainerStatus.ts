@@ -114,3 +114,54 @@ export function resistanceWarning(
   }
   return 'Best with a trainer that takes resistance.';
 }
+
+/**
+ * Whether the trainer reports cadence at all.
+ *
+ * Power and cadence arrive on the same notification, and plenty of trainers
+ * send one and not the other. Spin Cycle and Fish are steered on the pedals,
+ * so on a trainer that reports no cadence they are not hard, they are
+ * unplayable — and the rider should learn that from the card rather than
+ * from three minutes of a machine that is not listening.
+ */
+export type CadenceState = 'unknown' | 'reporting' | 'absent';
+
+/**
+ * How many consecutive readings with no cadence before calling it absent. A
+ * trainer that simply has not sent one yet must not be accused, so this is
+ * long enough to be a few seconds of pedalling at any notification rate.
+ */
+export const READINGS_BEFORE_ABSENT = 8;
+
+export interface CadenceWatch {
+  /** Readings seen since the current source was connected. */
+  readings: number;
+  /** True once any reading has carried a cadence. */
+  everReported: boolean;
+}
+
+export function createCadenceWatch(): CadenceWatch {
+  return { readings: 0, everReported: false };
+}
+
+export function noteCadence(w: CadenceWatch, rpm: number | null): void {
+  w.readings += 1;
+  if (rpm !== null) w.everReported = true;
+}
+
+export function cadenceState(w: CadenceWatch): CadenceState {
+  if (w.everReported) return 'reporting';
+  return w.readings >= READINGS_BEFORE_ABSENT ? 'absent' : 'unknown';
+}
+
+/**
+ * The warning a cadence game's card carries. Null unless the trainer has
+ * actually been asked and has actually not answered — a maybe here would be
+ * on every card on every fresh page load, and riders would stop reading it.
+ */
+export function cadenceWarning(
+  needsCadence: boolean | undefined, cadence: CadenceState,
+): string | null {
+  if (needsCadence !== true || cadence !== 'absent') return null;
+  return 'Your trainer is not reporting cadence, and this one is steered by it.';
+}

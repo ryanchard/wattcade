@@ -11,6 +11,7 @@ import type {
 } from '@paperboy/game-api';
 import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
+import { poster } from './poster.js';
 import { createRenderState, renderScene, updateRenderState } from './render.js';
 import type { RenderState } from './render.js';
 import {
@@ -98,10 +99,13 @@ export const fish: GameModule = {
     'smaller than you, and grow until it is no longer a problem.',
   // Flat road, thin air, on purpose. Read-only trainers play this in full.
   needsResistance: false,
+  // Cadence is depth. Without it there is no up and no down.
+  needsCadence: true,
   controls: [],
   // Deep water, one warm fish, and something glowing in the dark.
   palette: { base: '#12657f', accent: '#ff9d4d', detail: '#8ff0c4' },
   usesSeed: true,
+  poster,
   create(opts: GameCreateOptions): GameSession {
     return new FishGameSession(opts.profile, opts.seed ?? 1);
   },

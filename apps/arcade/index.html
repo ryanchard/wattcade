@@ -6,24 +6,38 @@
     <title>Wattcade</title>
     <style>
       /*
-        A bike computer, not a games portal. Near-black ground, one text
-        colour, figures in tabular numerals so nothing jitters as it counts,
-        and no colour of its own beyond the state colours — the games bring
-        the colour, through the swatch on each card.
+        Wattcade is a cabinet, not a screen.
+
+        The games are backlit — pre-dawn blue, a lit velodrome, the bottom of
+        the sea — so the page around them is the opposite: warm stock, flat
+        ink, a marquee across the top and each game behind its own side-art
+        panel. Screen print, not CRT. Everything here is one of five inks on
+        one paper, and nothing glows.
+
+        The art on each card is not in this file and is not an image file
+        either: every game draws its own poster, in its own palette, through
+        GameModule.poster. The hub only cuts the hole for it.
       */
       :root {
-        color-scheme: dark;
-        --ground: #0b0d10;
-        --surface: #12161b;
-        --surface-lift: #171c22;
-        --line: rgba(232, 230, 225, 0.1);
-        --line-strong: rgba(232, 230, 225, 0.2);
-        --text: #e8e6e1;
-        --dim: rgba(232, 230, 225, 0.62);
-        --faint: rgba(232, 230, 225, 0.38);
-        --warn: #e0a756;
-        --bad: #e0614a;
-        --good: #7fd88f;
+        color-scheme: light;
+
+        /* The stock, and the ink laid on it. */
+        --stock: #e6d8bd;
+        --stock-deep: #d8c5a2;
+        --paper: #f4ecda;
+        --ink: #1d1712;
+        --ink-soft: rgba(29, 23, 18, 0.66);
+        --ink-faint: rgba(29, 23, 18, 0.4);
+        --hair: rgba(29, 23, 18, 0.22);
+
+        /* Three coloured plates. Saturated and flat: no gradients on type. */
+        --red: #c03f2b;
+        --amber: #e0982a;
+        --teal: #1d6b78;
+        --cream: #fbf3e0;
+
+        --display: "Haettenschweiler", "Arial Narrow", "Roboto Condensed",
+          "Oswald", Impact, system-ui, sans-serif;
         --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
           Roboto, Helvetica, Arial, sans-serif;
         --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -33,10 +47,14 @@
 
       body {
         margin: 0;
-        background: var(--ground);
-        color: var(--text);
+        color: var(--ink);
         font: 400 16px/1.55 var(--sans);
         overflow: hidden;
+        /* Stock, with the halftone of the screen it was printed through. */
+        background-color: var(--stock);
+        background-image:
+          radial-gradient(rgba(29, 23, 18, 0.055) 1px, transparent 1px);
+        background-size: 4px 4px;
       }
 
       canvas { display: block; }
@@ -45,240 +63,337 @@
         position: fixed;
         inset: 0;
         overflow-y: auto;
-        background: var(--ground);
+        background-color: var(--stock);
+        background-image:
+          radial-gradient(rgba(29, 23, 18, 0.055) 1px, transparent 1px);
+        background-size: 4px 4px;
       }
       #overlay[hidden] { display: none; }
 
       .sheet {
-        max-width: 72rem;
+        max-width: 78rem;
         margin: 0 auto;
-        padding: 4rem 2rem 6rem;
+        padding: 0 1.5rem 5rem;
       }
       .sheet.card-only {
         min-height: 100%;
         display: grid;
         place-items: center;
+        padding: 2rem 1.5rem;
         /* The last frame of the run stays visible behind the card. */
-        background: rgba(11, 13, 16, 0.86);
+        background: rgba(16, 12, 9, 0.82);
       }
       #overlay:has(.card-only) { background: transparent; }
 
-      /* --- masthead -------------------------------------------------- */
+      .sr {
+        position: absolute;
+        width: 1px; height: 1px;
+        margin: -1px; padding: 0; border: 0;
+        overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+      }
 
-      .masthead {
+      /* --- the marquee ------------------------------------------------
+         The lit sign over the cabinet: the one place on the page where the
+         ink goes dark and the type gets big. The name is printed twice, a
+         hair out of register, the way a two-colour screen job goes when the
+         second pass lands late. */
+
+      .marquee {
+        position: relative;
+        margin: 0 -1.5rem 2.5rem;
+        padding: 0.5rem 1.5rem 0.75rem;
+        background: var(--ink);
+        color: var(--cream);
+        overflow: hidden;
+      }
+
+      .bulbs {
+        height: 10px;
+        background-image: radial-gradient(
+          circle at 5px 5px, var(--amber) 2.4px, rgba(224, 152, 42, 0.18) 3.2px,
+          transparent 3.6px);
+        background-size: 18px 10px;
+      }
+
+      .marquee h1 {
+        margin: 0.5rem 0 0;
+        font: 400 clamp(3rem, 13vw, 7.5rem)/0.86 var(--display);
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        text-align: center;
+      }
+      /* The misregistration. Two offset copies behind the key plate, never
+         so far out that the word stops being one word. */
+      .marquee h1 .word {
+        display: block;
+        text-shadow:
+          0.055em 0.035em 0 var(--red),
+          -0.03em -0.025em 0 var(--teal);
+      }
+
+      .marquee-line {
         display: flex;
-        align-items: baseline;
         justify-content: space-between;
-        gap: 1.5rem;
-        padding-bottom: 1.25rem;
-        border-bottom: 1px solid var(--line);
-        margin-bottom: 2.5rem;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin: 0.5rem 0 0.75rem;
+        font: 600 0.75rem var(--mono);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(251, 243, 224, 0.66);
       }
-      .masthead h1 {
-        margin: 0;
-        font-size: 2rem;
-        font-weight: 600;
-        letter-spacing: -0.02em;
-      }
-      .ridden {
-        margin: 0;
-        font: 500 0.875rem var(--mono);
-        font-variant-numeric: tabular-nums;
-        color: var(--dim);
-      }
+      .marquee-line .ridden { font-variant-numeric: tabular-nums; }
 
-      /* --- panels ---------------------------------------------------- */
+      /* --- panels ------------------------------------------------------ */
 
       .panels { display: grid; gap: 1.25rem; align-items: start; }
-      @media (min-width: 62rem) {
+      @media (min-width: 58rem) {
         .panels { grid-template-columns: 1fr 1fr; }
       }
 
       .panel {
-        background: var(--surface);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 1.5rem 1.75rem;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        border-radius: 4px;
+        padding: 1.25rem 1.5rem 1.5rem;
+        box-shadow: 5px 5px 0 rgba(29, 23, 18, 0.14);
       }
 
       .k {
-        margin: 0 0 0.75rem;
+        margin: 0 0 0.625rem;
         font: 600 0.6875rem var(--mono);
-        letter-spacing: 0.14em;
+        letter-spacing: 0.18em;
         text-transform: uppercase;
-        color: var(--faint);
+        color: var(--ink-faint);
       }
 
-      .trainer { border-left: 3px solid var(--faint); }
-      .trainer[data-mode="controls"] { border-left-color: var(--good); }
+      /* What the trainer can do is a state, and states get an ink block on
+         the edge — not a dot, and never a dot alone. */
+      .trainer { border-left-width: 10px; border-left-color: var(--ink-faint); }
+      .trainer[data-mode="controls"] { border-left-color: var(--teal); }
       .trainer[data-mode="readonly"],
-      .trainer[data-mode="keyboard"] { border-left-color: var(--warn); }
-      .trainer[data-mode="lost"] { border-left-color: var(--bad); }
-      .trainer[data-mode="connecting"] { border-left-color: var(--line-strong); }
+      .trainer[data-mode="keyboard"] { border-left-color: var(--amber); }
+      .trainer[data-mode="lost"] { border-left-color: var(--red); }
+      .trainer[data-mode="connecting"] { border-left-color: var(--stock-deep); }
+
+      /* The two panels are the two things that change how a game plays, so
+         they carry matching weight: the trainer's edge says which state it
+         is in, the rider's says it is the same order of decision. */
+      .rider { border-left-width: 10px; border-left-color: var(--ink); }
 
       .trainer .headline {
         margin: 0;
-        font-size: 1.375rem;
-        font-weight: 600;
-        letter-spacing: -0.01em;
+        font: 400 clamp(1.5rem, 3.4vw, 2rem)/1.05 var(--display);
+        text-transform: uppercase;
+        letter-spacing: 0.01em;
       }
-      .trainer .detail { margin: 0.375rem 0 0; color: var(--dim); }
-      .trainer .actions { margin: 1.25rem 0 0; display: flex; gap: 0.625rem; flex-wrap: wrap; }
+      .trainer .detail { margin: 0.5rem 0 0; color: var(--ink-soft); }
+      .trainer .actions {
+        margin: 1.125rem 0 0;
+        display: flex; gap: 0.625rem; flex-wrap: wrap;
+      }
 
       .fine {
         margin: 1rem 0 0;
         font-size: 0.8125rem;
         line-height: 1.6;
-        color: var(--faint);
-        max-width: 48rem;
+        color: var(--ink-soft);
+        max-width: 46rem;
       }
       .footer { margin-top: 2.5rem; }
 
-      /* --- the rider's numbers --------------------------------------- */
+      /* --- the rider's numbers ----------------------------------------- */
 
-      .fields { display: flex; gap: 1.75rem; flex-wrap: wrap; }
-      .fields label {
-        display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
+      .fields {
+        display: grid;
+        gap: 1rem 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
       }
+      .field { display: grid; gap: 0.375rem; align-content: start; }
+      /* What the number does, next to the number. A rider deciding whether
+         250 is right should not have to go looking. */
+      .does {
+        margin: 0;
+        font-size: 0.8125rem;
+        line-height: 1.5;
+        color: var(--ink-soft);
+      }
+      .fields label { display: flex; align-items: baseline; gap: 0.5rem; }
       .fields label > span {
         font: 600 0.6875rem var(--mono);
-        letter-spacing: 0.14em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: var(--faint);
-        min-width: 3.5rem;
+        color: var(--ink-faint);
+        min-width: 3.25rem;
       }
       .fields em {
         font-style: normal;
         font: 500 0.8125rem var(--mono);
-        color: var(--faint);
+        color: var(--ink-faint);
       }
       .fields input {
-        width: 5.5rem;
-        background: var(--ground);
-        border: 1px solid var(--line-strong);
-        border-radius: 6px;
-        padding: 0.5rem 0.625rem;
-        color: var(--text);
+        width: 5.25rem;
+        background: var(--stock);
+        border: 2px solid var(--ink);
+        border-radius: 3px;
+        padding: 0.4rem 0.5rem;
+        color: var(--ink);
         font: 600 1.125rem var(--mono);
         font-variant-numeric: tabular-nums;
       }
-      .fields input:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
 
-      /* --- buttons --------------------------------------------------- */
+      /* --- buttons ------------------------------------------------------ */
 
       button {
-        font: 500 0.9375rem var(--sans);
-        padding: 0.625rem 1.125rem;
-        border-radius: 6px;
-        border: 1px solid var(--line-strong);
-        background: var(--surface-lift);
-        color: var(--text);
+        font: 600 0.875rem var(--sans);
+        padding: 0.55rem 1rem;
+        border-radius: 3px;
+        border: 2px solid var(--ink);
+        background: var(--stock);
+        color: var(--ink);
         cursor: pointer;
       }
-      button:hover:not(:disabled) { background: #1e242b; border-color: var(--text); }
-      button:disabled { opacity: 0.4; cursor: not-allowed; }
-      button.go { background: var(--text); color: var(--ground); border-color: var(--text); font-weight: 600; }
-      button.go:hover:not(:disabled) { background: #fff; color: var(--ground); }
+      button:hover:not(:disabled) { background: var(--amber); }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      button.go {
+        background: var(--red);
+        color: var(--cream);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      button.go:hover:not(:disabled) { background: var(--ink); color: var(--cream); }
       button.ghost { background: transparent; }
 
-      /* --- the games ------------------------------------------------- */
+      /* One focus ring, on stock and on ink alike. */
+      :is(button, input, a):focus-visible {
+        outline: 3px solid var(--teal);
+        outline-offset: 2px;
+      }
+      .marquee :is(button, a):focus-visible { outline-color: var(--amber); }
+
+      /* --- the games ---------------------------------------------------- */
 
       .games {
         display: grid;
-        gap: 1.25rem;
+        gap: 1.5rem;
         margin-top: 2rem;
-      }
-      @media (min-width: 62rem) {
-        .games { grid-template-columns: repeat(3, 1fr); align-items: start; }
+        grid-template-columns: repeat(auto-fill, minmax(min(19rem, 100%), 1fr));
+        align-items: start;
       }
 
       .card {
-        background: var(--surface);
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        border-radius: 4px;
         overflow: hidden;
+        box-shadow: 6px 6px 0 rgba(29, 23, 18, 0.16);
       }
-      /* The hub has no palette of its own; each card wears the game's. */
-      .swatch { display: flex; height: 5px; }
-      .swatch i { flex: 1; }
-      .swatch i:nth-child(1) { background: var(--base); flex: 2; }
-      .swatch i:nth-child(2) { background: var(--accent); }
-      .swatch i:nth-child(3) { background: var(--detail); }
 
-      .card-body { padding: 1.5rem 1.5rem 1.75rem; }
-      .card h2 {
-        margin: 0 0 0.5rem;
-        font-size: 1.25rem;
-        font-weight: 600;
-        letter-spacing: -0.01em;
+      /* The side-art panel. The game paints into this box; the title plate
+         sits on the bottom edge of it the way a cabinet's does. */
+      .art {
+        position: relative;
+        aspect-ratio: 8 / 5;
+        background: var(--stock-deep);
+        border-bottom: 2px solid var(--ink);
       }
-      .blurb { margin: 0 0 1rem; color: var(--dim); font-size: 0.9375rem; }
+      .art .poster {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .plate {
+        position: absolute;
+        left: -2px;
+        bottom: -2px;
+        margin: 0;
+        max-width: calc(100% - 1.5rem);
+        padding: 0.3rem 0.9rem 0.35rem;
+        background: var(--ink);
+        color: var(--cream);
+        border-bottom: 4px solid var(--accent, var(--amber));
+        font: 400 clamp(1.5rem, 3.6vw, 2.125rem)/1 var(--display);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
 
+      .card-body {
+        padding: 1.125rem 1.25rem 1.375rem;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+      }
+      .blurb { margin: 0 0 0.875rem; color: var(--ink-soft); font-size: 0.9375rem; }
+
+      /* A setup warning is an amber plate, because it is the same fact in
+         both cases: this game wants something your trainer is not giving it. */
       .warn {
-        margin: 0 0 1rem;
-        padding: 0.625rem 0.75rem;
-        border-left: 2px solid var(--warn);
-        background: rgba(224, 167, 86, 0.08);
-        color: var(--warn);
+        margin: 0 0 0.875rem;
+        padding: 0.5rem 0.75rem;
+        border-left: 5px solid var(--amber);
+        background: rgba(224, 152, 42, 0.2);
+        color: var(--ink);
         font-size: 0.8125rem;
         line-height: 1.5;
       }
 
       .controls, .record {
-        margin: 0 0 0.375rem;
+        margin: 0 0 0.3rem;
         font: 400 0.75rem var(--mono);
         font-variant-numeric: tabular-nums;
-        color: var(--faint);
+        color: var(--ink-faint);
         line-height: 1.6;
       }
-      .record { margin-bottom: 1.25rem; color: var(--dim); }
+      .record { margin-bottom: 1rem; color: var(--ink-soft); }
 
-      .start { display: flex; gap: 0.625rem; align-items: flex-end; flex-wrap: wrap; }
-      .seed { display: flex; flex-direction: column; gap: 0.375rem; flex: 1 1 10rem; }
+      .start {
+        display: flex; gap: 0.625rem; align-items: flex-end;
+        flex-wrap: wrap; margin-top: auto;
+      }
+      .seed { display: flex; flex-direction: column; gap: 0.3rem; flex: 1 1 9rem; }
       .seed span {
         font: 600 0.6875rem var(--mono);
-        letter-spacing: 0.14em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: var(--faint);
+        color: var(--ink-faint);
       }
       .seed input {
-        background: var(--ground);
-        border: 1px solid var(--line-strong);
-        border-radius: 6px;
-        padding: 0.5rem 0.625rem;
-        color: var(--text);
+        background: var(--stock);
+        border: 2px solid var(--ink);
+        border-radius: 3px;
+        padding: 0.4rem 0.5rem;
+        color: var(--ink);
         font: 400 0.875rem var(--mono);
         width: 100%;
       }
 
-      /* --- a ladder -------------------------------------------------- */
+      /* --- a ladder ----------------------------------------------------- */
 
-      .variants { display: grid; gap: 0.5rem; }
+      .variants { display: grid; gap: 0.5rem; margin-top: auto; }
       .variant {
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 0.125rem 0.75rem;
         text-align: left;
-        padding: 0.75rem 0.875rem;
-        background: transparent;
-        border-color: var(--line);
+        padding: 0.625rem 0.75rem;
+        background: var(--stock);
+        border-color: var(--hair);
       }
-      .variant-name {
-        font: 600 0.9375rem var(--sans);
-        grid-column: 1;
-      }
+      .variant:hover:not(:disabled) { background: var(--amber); }
+      .variant-name { font: 600 0.9375rem var(--sans); grid-column: 1; }
       .variant-detail {
         grid-column: 1 / -1;
         font-size: 0.8125rem;
-        color: var(--dim);
+        color: var(--ink-soft);
         line-height: 1.5;
       }
       .variant-note {
         grid-column: 1 / -1;
         font: 400 0.75rem var(--mono);
-        color: var(--faint);
+        color: var(--ink-faint);
         line-height: 1.6;
         margin-top: 0.25rem;
       }
@@ -286,46 +401,131 @@
         grid-column: 2;
         grid-row: 1;
         font: 600 0.625rem var(--mono);
-        letter-spacing: 0.12em;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: var(--faint);
+        color: var(--ink-faint);
         align-self: center;
       }
-      .variant.cleared { border-color: var(--line-strong); }
-      .variant.cleared .variant-mark { color: var(--good); }
+      /* A rung not yet earned reads as an outline waiting to be printed. */
+      .variant.locked { background: transparent; border-style: dashed; }
+      .variant.cleared { border-color: var(--ink); }
+      .variant.cleared .variant-mark { color: var(--teal); }
 
-      /* --- results --------------------------------------------------- */
+      /* --- the high score table ----------------------------------------
+         The signature. Three letters and a number, monospaced, one column
+         per game — what a cabinet actually remembers you by. */
+
+      .scores { margin-top: 3rem; }
+      .section-plate {
+        display: inline-block;
+        margin: 0 0 1.25rem;
+        padding: 0.2rem 0.9rem 0.3rem;
+        background: var(--ink);
+        color: var(--cream);
+        font: 400 clamp(1.75rem, 4vw, 2.5rem)/1 var(--display);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        text-shadow: 0.04em 0.03em 0 var(--red);
+      }
+      .boards {
+        display: grid;
+        gap: 1rem;
+        grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+      }
+      .board {
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        border-radius: 4px;
+        padding: 0.75rem 0.875rem 0.875rem;
+      }
+      .board-game {
+        margin: 0 0 0.5rem;
+        padding-bottom: 0.3rem;
+        border-bottom: 3px solid var(--accent, var(--amber));
+        font: 400 1.375rem/1 var(--display);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+      .places { list-style: none; margin: 0; padding: 0; }
+      .place {
+        display: grid;
+        grid-template-columns: 1.25rem 3.25rem 1fr;
+        gap: 0.5rem;
+        align-items: baseline;
+        padding: 0.2rem 0;
+        font: 500 0.875rem var(--mono);
+        font-variant-numeric: tabular-nums;
+      }
+      .place .rank { color: var(--ink-faint); font-size: 0.75rem; }
+      .place .who { letter-spacing: 0.14em; white-space: pre; }
+      .place .what { text-align: right; }
+      .place.empty { color: var(--ink-faint); }
+
+      /* --- results ------------------------------------------------------ */
 
       .results {
         width: min(34rem, 100%);
-        background: var(--surface);
-        border: 1px solid var(--line);
-        border-top: 3px solid var(--accent);
-        border-radius: 10px;
-        padding: 2rem 2rem 2.25rem;
+        background: var(--paper);
+        border: 2px solid var(--ink);
+        border-top: 10px solid var(--accent, var(--red));
+        border-radius: 4px;
+        padding: 1.5rem 1.75rem 1.75rem;
+        box-shadow: 8px 8px 0 rgba(16, 12, 9, 0.5);
       }
       .results .headline {
         margin: 0;
-        font-size: 3.25rem;
-        font-weight: 600;
-        letter-spacing: -0.03em;
+        font: 400 clamp(3rem, 12vw, 4.5rem)/0.92 var(--display);
+        text-transform: uppercase;
         font-variant-numeric: tabular-nums;
-        line-height: 1.05;
       }
-      .results .summary { margin: 0.5rem 0 1.75rem; color: var(--dim); }
-      .rows { margin: 0 0 1.75rem; display: grid; gap: 0; }
+      .results .summary { margin: 0.375rem 0 0.875rem; color: var(--ink-soft); }
+
+      .posted {
+        margin: 0 0 1rem;
+        font: 600 0.8125rem var(--mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--red);
+      }
+      .posted.quiet { color: var(--ink-faint); }
+
+      .initials {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 0 0 1.25rem;
+      }
+      .initials span {
+        font: 600 0.6875rem var(--mono);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .initials input {
+        width: 5.5rem;
+        background: var(--stock);
+        border: 2px solid var(--ink);
+        border-radius: 3px;
+        padding: 0.3rem 0.6rem;
+        color: var(--ink);
+        font: 700 1.5rem/1.2 var(--mono);
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+
+      .rows { margin: 0 0 1.5rem; display: grid; gap: 0; }
       .rows > div {
         display: flex;
         justify-content: space-between;
         gap: 1.5rem;
-        padding: 0.5rem 0;
-        border-bottom: 1px solid var(--line);
+        padding: 0.4rem 0;
+        border-bottom: 1px solid var(--hair);
       }
       .rows dt {
         font: 600 0.6875rem var(--mono);
-        letter-spacing: 0.12em;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
-        color: var(--faint);
+        color: var(--ink-faint);
         white-space: nowrap;
         padding-top: 0.2rem;
       }
@@ -336,6 +536,58 @@
         text-align: right;
       }
       .results .actions { margin: 0; display: flex; gap: 0.625rem; flex-wrap: wrap; }
+
+      /* --- one moment of motion ----------------------------------------
+         The cabinet coming on: the marquee lights, then the cards land in
+         order, once, on the first paint of the hub. Nothing else on the page
+         moves, ever. */
+
+      @keyframes land {
+        from { opacity: 0; transform: translateY(14px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes strike {
+        from { opacity: 0; transform: scale(1.06); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes sweep {
+        from { transform: translateX(-110%); }
+        to { transform: translateX(110%); }
+      }
+
+      .sheet.intro .marquee h1 {
+        animation: strike 420ms both cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .sheet.intro .marquee::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(100deg, transparent 35%,
+          rgba(251, 243, 224, 0.16) 50%, transparent 65%);
+        animation: sweep 900ms 200ms both ease-out;
+      }
+      .sheet.intro .card {
+        animation: land 460ms both cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .sheet.intro .card:nth-child(1) { animation-delay: 180ms; }
+      .sheet.intro .card:nth-child(2) { animation-delay: 245ms; }
+      .sheet.intro .card:nth-child(3) { animation-delay: 310ms; }
+      .sheet.intro .card:nth-child(4) { animation-delay: 375ms; }
+      .sheet.intro .card:nth-child(5) { animation-delay: 440ms; }
+      .sheet.intro .card:nth-child(n + 6) { animation-delay: 505ms; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .sheet.intro .marquee h1,
+        .sheet.intro .card { animation: none; }
+        .sheet.intro .marquee::after { content: none; }
+        * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+      }
+
+      @media (max-width: 30rem) {
+        .sheet { padding-left: 1rem; padding-right: 1rem; }
+        .marquee { margin-left: -1rem; margin-right: -1rem; padding: 0.5rem 1rem 0.75rem; }
+      }
     </style>
   </head>
   <body>

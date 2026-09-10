@@ -124,6 +124,14 @@ export interface RunResult {
    * such thing, which is most of the time.
    */
   readonly nextVariantId?: string;
+  /**
+   * Seconds over a fixed distance, for a game that is raced rather than
+   * scored, so it can still hold a place on the high score table. Lower is
+   * better. Set it ONLY when the rider covered the whole distance: a race
+   * that ended when somebody else crossed the line is not a time, and
+   * ranking it as one would put every defeat above every win.
+   */
+  readonly rankTimeS?: number;
 }
 
 export interface GameSession {
@@ -194,6 +202,13 @@ export interface GameModule {
    * than letting the rider find out four minutes into a climb.
    */
   readonly needsResistance: boolean;
+  /**
+   * True when the game steers on cadence. Some trainers report power and no
+   * cadence at all, and a game read on the pedals is unplayable on one — so
+   * the hub says so on this game's card once it knows, rather than leaving
+   * the rider spinning at a machine that is not listening.
+   */
+  readonly needsCadence?: boolean;
   /** Empty means legs only, and the shell forwards no keyboard at all. */
   readonly controls: readonly ControlHint[];
   readonly palette: GamePalette;
@@ -201,5 +216,19 @@ export interface GameModule {
   readonly usesSeed?: boolean;
   /** The pre-run choices, if any. Read from `store` so progress persists. */
   variants?(store: Storage): readonly GameVariant[];
+  /**
+   * The game's own poster, drawn into the card that offers it.
+   *
+   * This is deliberately not an image file. A game that draws its own poster
+   * with its own palette and its own drawing code cannot advertise something
+   * it no longer looks like — re-grade the scene and the poster re-grades
+   * with it. It is a still life, not a screenshot: no session, no state, no
+   * randomness that is not seeded, and it must draw the same thing every
+   * time it is called at the same size.
+   *
+   * Optional. The hub falls back to a generated panel built from `palette`,
+   * so a game can ship without one and still look like it belongs.
+   */
+  poster?(ctx: CanvasRenderingContext2D, width: number, height: number): void;
   create(opts: GameCreateOptions): GameSession;
 }

@@ -11,7 +11,10 @@ import type { GameModule } from '@paperboy/game-api';
 import { CATALOG } from '../src/catalog.js';
 import { controlsLine, escapeHtml, renderHub } from '../src/hub.js';
 import type { HubModel } from '../src/hub.js';
-import { describeTrainer, resistanceWarning } from '../src/trainerStatus.js';
+import {
+  cadenceState, cadenceWarning, createCadenceWatch, describeTrainer,
+  noteCadence, READINGS_BEFORE_ABSENT, resistanceWarning,
+} from '../src/trainerStatus.js';
 
 const connected = (canControlResistance: boolean): TrainerStatus => ({
   kind: 'connected', deviceName: 'KICKR CORE', canControlResistance, message: null,
@@ -20,8 +23,10 @@ const connected = (canControlResistance: boolean): TrainerStatus => ({
 function model(over: Partial<HubModel> = {}): HubModel {
   return {
     trainer: describeTrainer('ftms', connected(true)),
+    cadence: 'reporting',
     profile: DEFAULT_RIDER,
     stats: {},
+    scores: {},
     games: CATALOG.map((game) => ({
       game, variants: game.variants?.(createMemoryStorage()) ?? [],
     })),
@@ -101,11 +106,32 @@ describe('renderHub', () => {
     const readonly = model({ trainer: describeTrainer('ftms', connected(false)) });
     const html = renderHub(readonly);
     const warned = CATALOG.filter((g) => g.needsResistance).length;
-    expect(html.split('class="warn"').length - 1).toBe(warned);
+    expect(html.split('data-warn="resistance"').length - 1).toBe(warned);
   });
 
   it('drops the warnings the moment a real trainer connects', () => {
     expect(renderHub(model())).not.toContain('class="warn"');
+  });
+
+  it('warns about missing cadence only on the games steered by it', () => {
+    const html = renderHub(model({ cadence: 'absent' }));
+    const steered = CATALOG.filter((g) => g.needsCadence === true).length;
+    expect(steered).toBeGreaterThan(0);
+    expect(html.split('data-warn="cadence"').length - 1).toBe(steered);
+  });
+
+  it('says nothing about cadence until the trainer has been asked', () => {
+    expect(renderHub(model({ cadence: 'unknown' }))).not.toContain('data-warn="cadence"');
+    expect(renderHub(model({ cadence: 'reporting' }))).not.toContain('data-warn="cadence"');
+  });
+
+  it('gives every game a poster to draw and a place on the board', () => {
+    const html = renderHub(model());
+    for (const game of CATALOG) {
+      expect(html).toContain(`data-poster="${game.id}"`);
+    }
+    // Five places per game, empty until somebody rides.
+    expect(html.split('class="place empty"').length - 1).toBe(CATALOG.length * 5);
   });
 
   it('shows the rider their three numbers', () => {
@@ -117,11 +143,15 @@ describe('renderHub', () => {
     expect(html).toContain('value="1240"');
   });
 
-  it('explains what each number changes', () => {
+  it('explains what each number changes, beside the number', () => {
+    // Not one block of small print at the bottom: each of the three boxes
+    // carries the line that says what moving it does.
     const html = renderHub(model());
+    expect(html.split('class="does"').length - 1).toBe(3);
     expect(html).toContain('hour effort');
     expect(html).toContain('five seconds');
-    expect(html).toMatch(/barely matters on\s+the flat/);
+    expect(html).toMatch(/matters on\s+the flat/);
+    expect(html).toMatch(/road tilts up/);
   });
 
   it('locks a ladder rung the rider has not earned', () => {
@@ -146,6 +176,35 @@ describe('renderHub', () => {
 
   it('escapes the five characters that matter', () => {
     expect(escapeHtml(`<&>"'`)).toBe('&lt;&amp;&gt;&quot;&#39;');
+  });
+});
+
+describe('cadence', () => {
+  it('does not accuse a trainer that has simply not reported yet', () => {
+    const w = createCadenceWatch();
+    noteCadence(w, null);
+    expect(cadenceState(w)).toBe('unknown');
+    expect(cadenceWarning(true, cadenceState(w))).toBeNull();
+  });
+
+  it('calls it absent once the trainer has had every chance', () => {
+    const w = createCadenceWatch();
+    for (let i = 0; i < READINGS_BEFORE_ABSENT; i++) noteCadence(w, null);
+    expect(cadenceState(w)).toBe('absent');
+    expect(cadenceWarning(true, cadenceState(w))).not.toBeNull();
+  });
+
+  it('never accuses a trainer that has reported once', () => {
+    const w = createCadenceWatch();
+    for (let i = 0; i < READINGS_BEFORE_ABSENT; i++) noteCadence(w, null);
+    noteCadence(w, 88);
+    expect(cadenceState(w)).toBe('reporting');
+    expect(cadenceWarning(true, cadenceState(w))).toBeNull();
+  });
+
+  it('stays quiet for a game that is not steered by cadence', () => {
+    expect(cadenceWarning(undefined, 'absent')).toBeNull();
+    expect(cadenceWarning(false, 'absent')).toBeNull();
   });
 });
 

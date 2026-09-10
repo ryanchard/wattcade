@@ -46,6 +46,24 @@ const CLOUD_SCALE = [0.7, 1, 1.5] as const;
 const FIELD_SPEED = 9;
 const FIELD_PERIOD = 190;
 
+/**
+ * The scene's colours, grouped and exported so the game's poster is drawn
+ * from the same decisions the scene is, and re-grades with it.
+ */
+export const POSTER_SKY = { top: SKY_TOP, mid: SKY_MID, haze: SKY_HAZE } as const;
+
+export const POSTER_INK = {
+  groundFar: GROUND_FAR,
+  groundNear: GROUND_NEAR,
+  hedge: HEDGE,
+  ink: INK,
+  inkSoft: INK_SOFT,
+  brass: BRASS,
+  canvas: CANVAS_CLOTH,
+  bunting: BUNTING_FLAGS,
+  balloon: BALLOON_RED,
+} as const;
+
 export interface RenderState {
   clouds: [number, number, number];
   fields: number;

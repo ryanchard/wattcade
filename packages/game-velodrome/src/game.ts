@@ -13,6 +13,7 @@ import type {
 } from '@paperboy/game-api';
 import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
+import { poster } from './poster.js';
 import { createRenderState, renderScene, updateRenderState } from './render.js';
 import type { RenderState } from './render.js';
 import {
@@ -152,6 +153,11 @@ class VelodromeSession implements GameSession {
       // scoreboard the game does not have.
       score: null,
       stopped: this.#stopped,
+      // Four laps is four laps whoever you rode it against, so a winning
+      // time is comparable with every other winning time and can hold a
+      // place on the board. A losing time is the moment somebody ELSE
+      // crossed the line, which would rank every defeat above every win.
+      ...(won && !r.aborted ? { rankTimeS: r.timeS } : {}),
       ...(won && next !== undefined ? { nextVariantId: next.id } : {}),
     };
   }
@@ -177,6 +183,7 @@ export const velodrome: GameModule = {
   // with the sprinters' line in red.
   palette: { base: '#0E1418', accent: '#C99A5E', detail: '#C2372F' },
   variants: ladderVariants,
+  poster,
   create(opts: GameCreateOptions): GameSession {
     const spec = rivalById(opts.variantId ?? '') ?? LADDER[0]!;
     return new VelodromeSession(opts.profile, spec, opts.store);

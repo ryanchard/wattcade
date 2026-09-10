@@ -6,18 +6,25 @@
  * things that must be unmissable are the two that change how the games play:
  * what the trainer can do, and the rider's own numbers.
  *
- * The page deliberately has no visual identity of its own beyond dark and
- * quiet. Three games that look like pre-dawn suburbia, a night chase and a
- * lit velodrome cannot share one, so each card carries a swatch of its own
- * palette and the hub borrows identity from its contents.
+ * The page is a cabinet, not a screen. Wattcade is printed on warm stock with
+ * flat ink and a marquee across the top, and each game sits behind its own
+ * side-art panel — art the game draws itself, in its own palette, through
+ * `GameModule.poster`. Five games that look like pre-dawn suburbia, a night
+ * chase, a lit velodrome, an English afternoon and the bottom of the sea
+ * cannot share a look, so the hub does not try to give them one: it gives
+ * them a frame and lets each fill it.
  */
 import type { GameModule, GameVariant, RunResult } from '@paperboy/game-api';
 import type { RiderProfile } from '@paperboy/trainer';
 import { sprintWatts } from '@paperboy/trainer';
+import {
+  BOARD_SIZE, boardFor, ordinal, postable,
+} from './scores.js';
+import type { ScoreBoards } from './scores.js';
 import { formatDuration, statsFor } from './stats.js';
 import type { ArcadeStats } from './stats.js';
-import { resistanceWarning } from './trainerStatus.js';
-import type { TrainerView } from './trainerStatus.js';
+import { cadenceWarning, resistanceWarning } from './trainerStatus.js';
+import type { CadenceState, TrainerView } from './trainerStatus.js';
 
 export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => (
@@ -32,8 +39,11 @@ export interface HubGame {
 
 export interface HubModel {
   readonly trainer: TrainerView;
+  /** Whether the trainer has been reporting cadence, once it is known. */
+  readonly cadence: CadenceState;
   readonly profile: RiderProfile;
   readonly stats: ArcadeStats;
+  readonly scores: ScoreBoards;
   readonly games: readonly HubGame[];
   /** Whatever is currently typed in the seed box, preserved across redraws. */
   readonly seed: string;
@@ -60,6 +70,23 @@ function recordLine(game: GameModule, stats: ArcadeStats): string {
   return parts.join(' · ');
 }
 
+/**
+ * The warnings a card carries about the rider's own setup. Both are about
+ * the same thing — this game wants something your trainer is not giving it —
+ * so they look alike and are tagged apart, and both stay absent whenever
+ * there is nothing to say.
+ */
+function warnings(game: GameModule, model: HubModel): string {
+  const lines: Array<{ kind: string; text: string }> = [];
+  const resistance = resistanceWarning(game.needsResistance, model.trainer);
+  if (resistance !== null) lines.push({ kind: 'resistance', text: resistance });
+  const cadence = cadenceWarning(game.needsCadence, model.cadence);
+  if (cadence !== null) lines.push({ kind: 'cadence', text: cadence });
+  return lines
+    .map((l) => `<p class="warn" data-warn="${l.kind}">${escapeHtml(l.text)}</p>`)
+    .join('');
+}
+
 function variantButton(gameId: string, v: GameVariant): string {
   const classes = ['variant'];
   if (v.cleared === true) classes.push('cleared');
@@ -74,11 +101,8 @@ function variantButton(gameId: string, v: GameVariant): string {
     </button>`;
 }
 
-export function gameCard(
-  entry: HubGame, model: HubModel,
-): string {
+export function gameCard(entry: HubGame, model: HubModel): string {
   const { game, variants } = entry;
-  const warning = resistanceWarning(game.needsResistance, model.trainer);
   const palette = game.palette;
 
   const start = variants.length > 0
@@ -98,11 +122,14 @@ export function gameCard(
   return `
     <article class="card" style="--base:${escapeHtml(palette.base)};
       --accent:${escapeHtml(palette.accent)};--detail:${escapeHtml(palette.detail)}">
-      <div class="swatch" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="art">
+        <canvas class="poster" data-poster="${escapeHtml(game.id)}"
+          role="img" aria-label="${escapeHtml(game.name)} cabinet art"></canvas>
+        <h2 class="plate">${escapeHtml(game.name)}</h2>
+      </div>
       <div class="card-body">
-        <h2>${escapeHtml(game.name)}</h2>
         <p class="blurb">${escapeHtml(game.blurb)}</p>
-        ${warning === null ? '' : `<p class="warn">${escapeHtml(warning)}</p>`}
+        ${warnings(game, model)}
         <p class="controls">${escapeHtml(controlsLine(game))}</p>
         <p class="record">${escapeHtml(recordLine(game, model.stats))}</p>
         ${start}
@@ -126,36 +153,77 @@ export function trainerPanel(view: TrainerView): string {
     </section>`;
 }
 
+/**
+ * One of the rider's three numbers, with the line that says what changing it
+ * changes. The line sits under the box rather than in a block of small print
+ * at the bottom, because a rider deciding whether 250 is right needs to know
+ * what 250 does at the moment they are looking at the box.
+ */
+function riderField(
+  id: string, label: string, unit: string, value: number,
+  min: number, max: number, step: number, does: string,
+): string {
+  return `
+    <div class="field">
+      <label>
+        <span>${escapeHtml(label)}</span>
+        <input id="${escapeHtml(id)}" type="number" min="${min}" max="${max}"
+          step="${step}" value="${Math.round(value)}">
+        <em>${escapeHtml(unit)}</em>
+      </label>
+      <p class="does">${escapeHtml(does)}</p>
+    </div>`;
+}
+
 export function riderPanel(profile: RiderProfile): string {
   return `
     <section class="panel rider">
       <p class="k">Rider</p>
       <div class="fields">
-        <label>
-          <span>FTP</span>
-          <input id="ftp" type="number" min="60" max="600" step="5"
-            value="${Math.round(profile.ftpWatts)}">
-          <em>W</em>
-        </label>
-        <label>
-          <span>Sprint</span>
-          <input id="sprint" type="number" min="100" max="2500" step="10"
-            value="${Math.round(sprintWatts(profile))}">
-          <em>W</em>
-        </label>
-        <label>
-          <span>Weight</span>
-          <input id="mass" type="number" min="35" max="200" step="1"
-            value="${Math.round(profile.massKg)}">
-          <em>kg</em>
-        </label>
+        ${riderField('ftp', 'FTP', 'W', profile.ftpWatts, 60, 600, 5,
+    'Your hour effort. It sets how hard the long parts are.')}
+        ${riderField('sprint', 'Sprint', 'W', sprintWatts(profile), 100, 2500, 10,
+    'Your best five seconds. It sets how hard the short ones are — a rider '
+    + 'who sprints at 1200 W and one who sprints at 500 W should not be '
+    + 'asked for the same thing.')}
+        ${riderField('mass', 'Weight', 'kg', profile.massKg, 35, 200, 1,
+    'Barely matters on the flat, where you are mostly fighting the air. '
+    + 'Decides everything the moment the road tilts up.')}
       </div>
-      <p class="fine">FTP is the hour effort, and it sets how hard the long
-        parts are. Sprint is your best five seconds, and it sets how hard the
-        short ones are — a rider who sprints at 1200 W and one who sprints at
-        500 W should not be asked for the same thing. Weight barely matters on
-        the flat, where you are mostly fighting the air, and decides
-        everything the moment the road tilts up.</p>
+    </section>`;
+}
+
+/** One game's column of the board: five places, filled or waiting. */
+function scoreBoard(entry: HubGame, model: HubModel): string {
+  const board = boardFor(model.scores, entry.game.id);
+  const rows: string[] = [];
+  for (let i = 0; i < BOARD_SIZE; i++) {
+    const e = board.entries[i];
+    rows.push(e === undefined
+      ? `<li class="place empty"><span class="rank">${i + 1}</span>
+          <span class="who">···</span><span class="what">—</span></li>`
+      : `<li class="place"><span class="rank">${i + 1}</span>
+          <span class="who">${escapeHtml(e.initials)}</span>
+          <span class="what">${escapeHtml(e.display)}</span></li>`);
+  }
+  return `
+    <div class="board" style="--accent:${escapeHtml(entry.game.palette.accent)}">
+      <p class="board-game">${escapeHtml(entry.game.name)}</p>
+      <ol class="places">${rows.join('')}</ol>
+    </div>`;
+}
+
+export function scoresSection(model: HubModel): string {
+  return `
+    <section class="scores">
+      <h2 class="section-plate">High scores</h2>
+      <div class="boards">
+        ${model.games.map((entry) => scoreBoard(entry, model)).join('')}
+      </div>
+      <p class="fine">Three letters, typed after the ride. A ride you stopped
+        does not post a score. Velodrome is ranked on the clock, and only a
+        race you finished puts a time up — everything else is ranked on the
+        number the game itself shows you.</p>
     </section>`;
 }
 
@@ -172,17 +240,24 @@ export function renderHub(model: HubModel): string {
     : `${t.runs} ride${t.runs === 1 ? '' : 's'} · ${formatDuration(t.seconds)}`;
 
   return `
-    <header class="masthead">
-      <h1>Wattcade</h1>
-      <p class="ridden">${escapeHtml(ridden)}</p>
+    <header class="marquee">
+      <div class="bulbs" aria-hidden="true"></div>
+      <h1><span class="word" aria-hidden="true">Wattcade</span
+        ><span class="sr">Wattcade</span></h1>
+      <p class="marquee-line">
+        <span>${model.games.length} games, one bike</span>
+        <span class="ridden">${escapeHtml(ridden)}</span>
+      </p>
+      <div class="bulbs" aria-hidden="true"></div>
     </header>
     <div class="panels">
       ${trainerPanel(model.trainer)}
       ${riderPanel(model.profile)}
     </div>
-    <section class="games">
+    <section class="games" aria-label="Games">
       ${model.games.map((entry) => gameCard(entry, model)).join('')}
     </section>
+    ${scoresSection(model)}
     <p class="fine footer">Esc stops a ride and relaxes the trainer. P pauses
       it. Both work in every game, and both leave the trainer flat.</p>`;
 }
@@ -193,6 +268,29 @@ export interface ResultsModel {
   /** Name of the variant to offer next, when this run unlocked one. */
   readonly nextName: string | null;
   readonly nextId: string | null;
+  /** Where this run landed on the game's board, when it landed at all. */
+  readonly place: number | null;
+  /** The initials it was posted under, for the rider to correct. */
+  readonly initials: string;
+}
+
+/**
+ * What the board did with this run, said before the rider types anything.
+ * Seeing the place first and the initials second is the order an arcade does
+ * it in, and the only order in which typing your initials means something.
+ */
+function placeLine(model: ResultsModel): string {
+  if (model.place !== null) {
+    return `<p class="posted">${escapeHtml(ordinal(model.place))} on
+      ${escapeHtml(model.game.name)}.</p>`;
+  }
+  if (model.result.stopped) {
+    return '<p class="posted quiet">Stopped, so nothing posted to the board.</p>';
+  }
+  if (postable(model.result) === null) {
+    return '<p class="posted quiet">Nothing to post to the board this time.</p>';
+  }
+  return `<p class="posted quiet">Not quite a top ${BOARD_SIZE}.</p>`;
 }
 
 export function resultsCard(model: ResultsModel): string {
@@ -208,6 +306,13 @@ export function resultsCard(model: ResultsModel): string {
       <p class="k">${escapeHtml(model.game.name)}</p>
       <p class="headline">${escapeHtml(r.headline)}</p>
       <p class="summary">${escapeHtml(r.summary)}</p>
+      ${placeLine(model)}
+      ${model.place === null ? '' : `
+        <label class="initials">
+          <span>Initials</span>
+          <input id="initials" maxlength="3" size="3" autocomplete="off"
+            spellcheck="false" value="${escapeHtml(model.initials.trim())}">
+        </label>`}
       <dl class="rows">
         ${rows.map((row) => `
           <div><dt>${escapeHtml(row.label)}</dt><dd>${escapeHtml(row.value)}</dd></div>

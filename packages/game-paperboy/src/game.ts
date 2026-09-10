@@ -13,6 +13,7 @@ import type {
 import { randomSeed, recordRun } from '@paperboy/game-core';
 import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
+import { poster } from './poster.js';
 import { renderFrame } from './render/scene.js';
 import { advance, createSession, simulationFor, toRunResult } from './session.js';
 import type { Session } from './session.js';
@@ -124,6 +125,7 @@ export const paperboy: GameModule = {
   // Pre-dawn suburbia: cold blue sky, a warm porch light, sunrise on the
   // horizon.
   palette: { base: '#1b1f3b', accent: '#ffd98a', detail: '#e8a166' },
+  poster,
   create(opts: GameCreateOptions): GameSession {
     return new PaperboySession(opts.seed ?? randomSeed(), opts.profile);
   },

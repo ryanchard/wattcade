@@ -12,6 +12,7 @@ import type {
 } from '@paperboy/game-api';
 import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
+import { poster } from './poster.js';
 import { createRenderState, renderScene, updateRenderState } from './render.js';
 import type { RenderState } from './render.js';
 import {
@@ -106,6 +107,7 @@ export const pack: GameModule = {
   controls: [],
   // A night chase: cold sky, one warm rider, the dog that has you.
   palette: { base: '#1b2036', accent: '#c94f3a', detail: '#3c4568' },
+  poster,
   create(opts: GameCreateOptions): GameSession {
     return new PackSession(opts.profile);
   },
