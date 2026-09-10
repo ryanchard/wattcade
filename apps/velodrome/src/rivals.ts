@@ -262,12 +262,12 @@ export function rivalPowerFraction(
 
 export const DIESEL: RivalSpec = {
   id: 'diesel',
-  name: 'Rolf Vandenbroucke',
+  name: 'Brendy',
   line: 'Forty years on the boards and not one wasted watt.',
   tell: 'The power never moves. Not once, not for anything.',
-  counter: 'Sit on his wheel the whole way and come past in the last 100 m.',
+  counter: 'Sit on their wheel the whole way and come past in the last 100 m.',
   // Metronomic. Flat is the whole character: it is also the tutorial, because
-  // a rider who does not yet trust the draft will burn out beside him and a
+  // a rider who does not yet trust the draft will burn out beside them and a
   // rider who tucks in will feel the trainer go quiet.
   baseCurve: [[0, 0.92], [1, 0.92]],
   moves: [],
@@ -278,10 +278,10 @@ export const DIESEL: RivalSpec = {
 
 export const FLYER: RivalSpec = {
   id: 'flyer',
-  name: 'Kiko Salvatierra',
-  line: 'Leads every race he has ever ridden. Wins about a third of them.',
+  name: 'Tom',
+  line: 'Leads every race they have ever ridden. Wins about a third of them.',
   tell: 'An opening lap nobody on earth could hold for four.',
-  counter: 'Do not chase. Ride your own tempo and he comes back to you.',
+  counter: 'Do not chase. Ride your own tempo and they come back to you.',
   // Average is about 0.93 of the player's FTP, but spent so unevenly that an
   // even effort at the same average covers the kilometre faster. There is no
   // fatigue model in this game on purpose — the rider's own legs are it — so
@@ -298,10 +298,10 @@ export const FLYER: RivalSpec = {
 
 export const ATTACKER: RivalSpec = {
   id: 'attacker',
-  name: 'Dita Marchetti',
+  name: 'Shum',
   line: 'Attacks until something breaks. Usually someone else.',
   tell: 'Five attacks, evenly spaced, each with a soft patch behind it.',
-  counter: 'Cover the ones that matter and recover in her draft between.',
+  counter: 'Cover the ones that matter and recover in their draft between.',
   baseCurve: [[0, 0.86], [1, 0.86]],
   moves: [
     { at: 0.12, kind: 'surge', amplitude: 0.55, riseS: 1.4, durationS: 9 },
@@ -317,8 +317,8 @@ export const ATTACKER: RivalSpec = {
 
 export const FEINTER: RivalSpec = {
   id: 'feinter',
-  name: 'Ondrej Palas',
-  line: 'Lies with his shoulders. Twice a lap, sometimes three.',
+  name: 'Caleb',
+  line: 'Lies with their shoulders. Twice a lap, sometimes three.',
   tell: 'The bluffs collapse inside two seconds. The real one keeps going.',
   counter: 'Count to three before you answer. Only two of these are real.',
   baseCurve: [[0, 0.89], [0.5, 0.93], [1, 0.99]],
@@ -337,10 +337,10 @@ export const FEINTER: RivalSpec = {
 
 export const WHEELSUCKER: RivalSpec = {
   id: 'wheelsucker',
-  name: 'Ines Duclos',
+  name: 'Fonz',
   line: 'Has not led a lap since 2019. Has not needed to.',
-  tell: 'However slowly you ride, she will not come past. She is waiting.',
-  counter: 'Force the pace, or play chicken and jump before she does.',
+  tell: 'However slowly you ride, they will not come past. They are waiting.',
+  counter: 'Force the pace, or play chicken and jump before they do.',
   baseCurve: [[0, 0.80], [1, 0.80]],
   moves: [],
   recovery: null,
@@ -350,10 +350,10 @@ export const WHEELSUCKER: RivalSpec = {
 
 export const CHAMPION: RivalSpec = {
   id: 'champion',
-  name: 'Marit Halvorsen',
+  name: 'Charlie',
   line: 'World champion. Rides the race you are riding, only better.',
-  tell: 'She answers you. Attack and she is there; ease and she is gone.',
-  counter: 'Give her nothing to read. Save it all for the last 100 m.',
+  tell: 'They answer you. Attack and they are there; ease and they are gone.',
+  counter: 'Give them nothing to read. Save it all for the last 100 m.',
   baseCurve: [[0, 0.95], [0.5, 0.99], [0.8, 1.03], [1, 1.08]],
   // One genuine mid-race move on top of the adaptation, so the exam tests
   // the Feinter lesson as well as the Wheelsucker one.
