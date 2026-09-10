@@ -8009,7 +8009,11 @@ export class PaperboyRun {
         continue;
       }
 
-      if (!house.spec.subscriber || house.delivered) continue;
+      // `resolved` matters as much as `delivered`: smashing a subscriber's
+      // window cancels them, and without this check the player could take the
+      // penalty and then still score a full delivery to the same house.
+      // Version A shipped exactly that bug.
+      if (!house.spec.subscriber || house.delivered || house.resolved) continue;
       house.delivered = true;
       house.resolved = true;
       events.push({ type: outcome.band === 'mailbox' ? 'mailbox' : 'porch' });
