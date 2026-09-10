@@ -100,7 +100,8 @@ npm run dev
 
 Open the URL it prints — `http://localhost:5185` — enter your FTP, sprint
 power and weight, then either connect a trainer or press **Ride from the
-keyboard** and hold `W`.
+keyboard** and hold `W`. If you have a gamepad, plug it in first: its shoulder
+buttons are the shift paddles, and the hub will say what it can see.
 
 Running the checks:
 
@@ -125,7 +126,18 @@ rules it follows are worth stating plainly.
   before the bytes go out.
 - **Escape stops the ride and P pauses it.** Both work in every game, and
   both leave the trainer flat. They belong to the shell, not to the games, so
-  no game can fail to implement them.
+  no game can fail to implement them. A connected gamepad has both as well —
+  Start pauses, Select or B stops — because a rider who needs to stop should
+  not have to reach for a keyboard.
+- **The virtual gear cannot reach past the clamp.** The shell keeps a
+  twelve-speed block (neutral at 4) and multiplies whatever load a game asks
+  for before it reaches the trainer, so a rider on a single sprocket can still
+  find a resistance their legs agree with. It is applied inside the same
+  under-load test as everything else, so a pause, a hidden tab or the safety
+  stop still send flat whatever gear you are in, and its grade goes through
+  `clampGrade` on the way out. Shift with a controller's shoulder buttons, or
+  `[` and `]`. Spin Cycle and Fish are single-speed on purpose: cadence steers
+  them, and steering must stay cheap.
 - **One write per frame, and flat whenever you are not being asked to push.**
   Paused, finished, tab hidden, screen asleep, page closing: every one of
   those makes the value sent a flat road, regardless of what the game asked
@@ -185,6 +197,8 @@ export interface GameModule {
   readonly needsResistance: boolean;
   /** True when this game steers on cadence. */
   readonly needsCadence?: boolean;
+  /** True when this game's load is its design and the shell must not gear it. */
+  readonly singleSpeed?: boolean;
   /** Empty means legs only, and the shell forwards no keyboard at all. */
   readonly controls: readonly ControlHint[];
   readonly palette: GamePalette;
