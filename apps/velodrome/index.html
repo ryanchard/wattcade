@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Velodrome</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --boards: #C99A5E;
+        --boards-shadow: #8A6236;
+        --cote: #2E7FA8;
+        --sprint: #C2372F;
+        --arena: #0E1418;
+        --light: #FFF4DC;
+        --display: "Haettenschweiler", "Arial Narrow", "Roboto Condensed",
+                   "Oswald", Impact, system-ui, sans-serif;
+        --label: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--arena); overflow: hidden;
+        font: 14px/1.6 var(--label); color: var(--light);
+      }
+      canvas { display: block; }
+
+      #overlay {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background:
+          radial-gradient(120% 90% at 50% 0%,
+            rgba(201, 154, 94, .10), rgba(14, 20, 24, 0) 60%),
+          rgba(7, 11, 14, .94);
+        overflow: auto; padding: 2rem 1rem;
+      }
+      #overlay[hidden] { display: none; }
+
+      .panel { width: min(46rem, 100%); }
+      h1 {
+        font-family: var(--display); font-weight: 800;
+        font-size: clamp(2.6rem, 8vw, 4.4rem); line-height: .95;
+        letter-spacing: .02em; margin: 0 0 .4rem;
+        font-variant-numeric: tabular-nums;
+      }
+      h1.won { color: var(--boards); }
+      .lede { color: rgba(255, 244, 220, .78); margin: 0 0 1.4rem;
+              max-width: 34rem; }
+      .dim { color: rgba(255, 244, 220, .5); }
+      .small { font-size: 12px; line-height: 1.7; }
+
+      .rider { display: flex; gap: 1.5rem; flex-wrap: wrap;
+               margin: 0 0 .5rem; align-items: baseline; }
+      .rider label { color: rgba(255, 244, 220, .55);
+                     text-transform: uppercase; letter-spacing: .12em;
+                     font-size: 11px; }
+      input {
+        font-family: var(--display); font-size: 1.9rem; font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        width: 5.2rem; margin: 0 .3rem; padding: .1rem .4rem;
+        background: transparent; color: var(--light);
+        border: 0; border-bottom: 2px solid var(--boards-shadow);
+      }
+      input:focus { outline: none; border-bottom-color: var(--boards); }
+
+      .ladder { display: grid; gap: 2px; margin: 1.4rem 0; }
+      button.rung {
+        display: grid; grid-template-columns: 2.6rem 1fr auto;
+        gap: 1rem; align-items: center; width: 100%; text-align: left;
+        padding: .8rem 1rem; font: inherit; color: inherit; cursor: pointer;
+        background: rgba(201, 154, 94, .07);
+        border: 0; border-left: 3px solid var(--boards-shadow);
+      }
+      button.rung:hover:not(:disabled) {
+        background: rgba(201, 154, 94, .16); border-left-color: var(--boards);
+      }
+      button.rung:disabled { opacity: .35; cursor: not-allowed; }
+      button.rung.done { border-left-color: var(--cote); }
+      .rung .num {
+        font-family: var(--display); font-size: 1.9rem; font-weight: 800;
+        color: var(--boards); font-variant-numeric: tabular-nums;
+      }
+      .rung .who { display: grid; gap: .1rem; }
+      .rung .name {
+        font-family: var(--display); font-size: 1.35rem; font-weight: 700;
+        letter-spacing: .02em;
+      }
+      .rung .line { color: rgba(255, 244, 220, .6); font-size: 12px; }
+      .rung .tell { color: var(--boards); font-size: 12px; }
+      .rung .tell.dim { color: rgba(255, 244, 220, .32); }
+      .rung .mark {
+        font-size: 10px; letter-spacing: .18em; color: var(--cote);
+      }
+
+      .sources { display: flex; gap: .6rem; align-items: center;
+                 flex-wrap: wrap; }
+      button:not(.rung) {
+        font: inherit; padding: .55rem 1.1rem; cursor: pointer;
+        background: transparent; color: var(--light);
+        border: 1px solid var(--boards-shadow); border-radius: 2px;
+        letter-spacing: .06em;
+      }
+      button:not(.rung):hover { background: rgba(201, 154, 94, .18);
+                                border-color: var(--boards); }
+      button.primary { background: var(--boards); color: #17110A;
+                       border-color: var(--boards); font-weight: 700; }
+      button.primary:hover { background: var(--light); }
+
+      .verdict { font-family: var(--display); font-size: 1.6rem;
+                 margin: 0 0 .6rem; font-variant-numeric: tabular-nums; }
+      .stats { display: flex; gap: 1.6rem; flex-wrap: wrap;
+               font-family: var(--display); font-size: 1.5rem;
+               font-variant-numeric: tabular-nums;
+               color: rgba(255, 244, 220, .72); margin: 0 0 1.2rem; }
+      .tellcard { border-left: 3px solid var(--sprint);
+                  padding: .5rem 0 .5rem 1rem; margin: 0 0 1.4rem;
+                  color: rgba(255, 244, 220, .8); }
+      .tellcard strong { color: var(--boards); text-transform: uppercase;
+                         letter-spacing: .12em; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+    <div id="overlay">
+      <div class="panel" id="panel"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
