@@ -22,14 +22,46 @@ const V_MAX = 30;
 export interface RiderProfile {
   massKg: number;
   ftpWatts: number;
+  /**
+   * Best five-second effort, in watts. FTP describes what a rider can hold
+   * for an hour and says nothing about what they can do for five seconds:
+   * two riders on the same FTP can be 600 W apart in a sprint. Any mechanic
+   * built on a short, hard effort — shaking a dog off, coming round somebody
+   * in the last 50 m — has to scale off this number rather than off FTP.
+   *
+   * Optional so that every existing caller keeps working; read it through
+   * `sprintWatts()`, which falls back to a multiple of FTP.
+   */
+  sprintWatts?: number;
   cdA: number;
   crr: number;
   drivetrainEfficiency: number;
 }
 
+/**
+ * Peak five-second power as a multiple of FTP, used when a rider has not
+ * told us their own. Three to four times FTP is the ordinary range for a
+ * trained rider; the middle of it is the least wrong guess available.
+ */
+export const DEFAULT_SPRINT_MULTIPLE = 3.5;
+
+/**
+ * The rider's peak five-second power, or an estimate from their FTP when
+ * they have not entered one. Never returns less than FTP: a sprint that is
+ * weaker than an hour effort is a typo, not a rider.
+ */
+export function sprintWatts(rider: RiderProfile): number {
+  const stated = rider.sprintWatts;
+  if (stated !== undefined && Number.isFinite(stated) && stated > 0) {
+    return Math.max(rider.ftpWatts, stated);
+  }
+  return rider.ftpWatts * DEFAULT_SPRINT_MULTIPLE;
+}
+
 export const DEFAULT_RIDER: RiderProfile = {
   massKg: 85,
   ftpWatts: 200,
+  sprintWatts: 700,
   cdA: 0.32,
   crr: 0.005,
   drivetrainEfficiency: 0.97,

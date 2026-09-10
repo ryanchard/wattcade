@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RIDER,
+  DEFAULT_SPRINT_MULTIPLE,
+  sprintWatts,
   stepPhysics,
   steadyStateSpeed,
 } from '../src/physics.js';
@@ -134,5 +136,32 @@ describe('stepPhysics', () => {
     expect(Number.isFinite(s.speed)).toBe(true);
     expect(s.speed).toBeGreaterThanOrEqual(0);
     expect(s.speed).toBeLessThanOrEqual(30);
+  });
+});
+
+describe('sprintWatts', () => {
+  it('uses the rider’s own number when they have entered one', () => {
+    expect(sprintWatts({ ...DEFAULT_RIDER, ftpWatts: 250, sprintWatts: 1200 }))
+      .toBe(1200);
+  });
+
+  it('estimates from FTP when the rider has not entered one', () => {
+    const { sprintWatts: _omitted, ...rest } = DEFAULT_RIDER;
+    expect(sprintWatts({ ...rest, ftpWatts: 250 }))
+      .toBe(250 * DEFAULT_SPRINT_MULTIPLE);
+  });
+
+  it('never reports a sprint weaker than an hour effort', () => {
+    // A rider who types their FTP into the sprint box has made a typo, not
+    // discovered a new physiology.
+    expect(sprintWatts({ ...DEFAULT_RIDER, ftpWatts: 300, sprintWatts: 120 }))
+      .toBe(300);
+  });
+
+  it('ignores a nonsensical stored value rather than propagating it', () => {
+    expect(sprintWatts({ ...DEFAULT_RIDER, ftpWatts: 200, sprintWatts: 0 }))
+      .toBe(200 * DEFAULT_SPRINT_MULTIPLE);
+    expect(sprintWatts({ ...DEFAULT_RIDER, ftpWatts: 200, sprintWatts: NaN }))
+      .toBe(200 * DEFAULT_SPRINT_MULTIPLE);
   });
 });
