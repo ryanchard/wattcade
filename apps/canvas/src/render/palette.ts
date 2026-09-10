@@ -7,6 +7,10 @@ export const PALETTE = {
   lawn: '#5f7a5a',
   curb: '#8d8779',
   houseWall: ['#c47a4e', '#a8623f', '#9c8552', '#7d6b53', '#b0855c'],
+  // Cool, desaturated slate/grey hues for non-subscriber houses — a hue
+  // difference from `houseWall`, not just a dimmer version of it, so the
+  // subscriber/non-subscriber read survives at speed.
+  houseWallCool: ['#5f6672', '#6d7480', '#565c66'],
   houseRoof: ['#4a3b33', '#3d3129', '#55443a'],
   subscriberGlow: '#ffd98a',
   mailboxSubscriber: '#4f9dd6',

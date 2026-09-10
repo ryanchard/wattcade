@@ -103,7 +103,7 @@ function resolveLanding(
   }
 
   // mailbox or porch
-  if (!house.spec.subscriber || house.delivered) return null;
+  if (!house.spec.subscriber || house.delivered || house.resolved) return null;
   house.delivered = true;
   house.resolved = true;
   return band === 'mailbox' ? { type: 'mailbox' } : { type: 'porch' };

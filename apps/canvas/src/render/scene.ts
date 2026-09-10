@@ -17,12 +17,30 @@ function hashPick<T>(id: string, items: readonly T[]): T {
   return items[h % items.length]!;
 }
 
+const HEX_COLOUR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+/**
+ * Multiplies a hex colour's channels by `amount`. Hardened against the two
+ * malformed inputs this codebase's own literals can produce: a short hex
+ * like the hazard palette's '#999' fallback, and a non-finite `amount`.
+ * Anything that isn't a well-formed 3- or 6-digit hex colour is returned
+ * unchanged rather than turned into invalid CSS that canvas silently drops.
+ */
 function shade(hex: string, amount: number): string {
-  const n = Number.parseInt(hex.slice(1), 16);
+  const match = HEX_COLOUR.exec(hex);
+  if (match === null) return hex;
+
+  const digits = match[1]!;
+  const expanded = digits.length === 3
+    ? digits.split('').map((c) => c + c).join('')
+    : digits;
+  const n = Number.parseInt(expanded, 16);
+  const safeAmount = Number.isFinite(amount) ? Math.max(0, Math.min(2, amount)) : 1;
+
   const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
-  const r = clamp(((n >> 16) & 255) * amount);
-  const g = clamp(((n >> 8) & 255) * amount);
-  const b = clamp((n & 255) * amount);
+  const r = clamp(((n >> 16) & 255) * safeAmount);
+  const g = clamp(((n >> 8) & 255) * safeAmount);
+  const b = clamp((n & 255) * safeAmount);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
@@ -51,7 +69,13 @@ function drawStreet(d: DrawCtx, w: WorldState): void {
 }
 
 function drawHouse(d: DrawCtx, house: WorldState['houses'][number]): void {
-  const wall = hashPick(house.spec.id, PALETTE.houseWall);
+  // A hue difference, not just a brightness difference, so subscriber vs.
+  // non-subscriber houses are legible at speed even before the window or
+  // mailbox colour registers.
+  const wall = hashPick(
+    house.spec.id,
+    house.spec.subscriber ? PALETTE.houseWall : PALETTE.houseWallCool,
+  );
   const roof = hashPick(`${house.spec.id}r`, PALETTE.houseRoof);
   const lit = house.spec.subscriber && !house.windowBroken;
 

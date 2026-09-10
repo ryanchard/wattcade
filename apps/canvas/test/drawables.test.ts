@@ -65,4 +65,46 @@ describe('collectDrawables', () => {
     w.stacks.forEach((s) => { s.taken = true; });
     expect(collectDrawables(w).some((d) => d.kind === 'stack')).toBe(false);
   });
+
+  it('includes an untaken stack that lies within the cull window', () => {
+    const w = populated();
+    // Block 0 always seeds a stack (see route.ts), and with the rider at
+    // distance 60 it falls well inside [0, 320]. This is a positive check:
+    // unlike the "does not include a collected stack" test above, it fails
+    // if stack rendering is removed entirely rather than merely filtered.
+    const target = w.stacks.find(
+      (s) =>
+        !s.taken &&
+        s.spec.distance > w.rider.distance - 60 &&
+        s.spec.distance < w.rider.distance + 260,
+    );
+    expect(target).toBeDefined();
+
+    const list = collectDrawables(w);
+    expect(
+      list.some((d) => d.kind === 'stack' && d.stack === target),
+    ).toBe(true);
+  });
+
+  it('includes every house that lies within the documented cull window', () => {
+    const w = populated();
+    // Deliberately hard-codes the 60/260 window (rather than importing
+    // CULL_BEHIND_M/CULL_AHEAD_M) so the test still catches a regression
+    // if those constants themselves are narrowed by mistake.
+    const lo = w.rider.distance - 60;
+    const hi = w.rider.distance + 260;
+    const expectedHouses = w.houses.filter(
+      (h) => h.spec.distance > lo && h.spec.distance < hi,
+    );
+    expect(expectedHouses.length).toBeGreaterThan(0);
+
+    const drawnHouses = new Set(
+      collectDrawables(w)
+        .filter((d) => d.kind === 'house')
+        .map((d) => d.house),
+    );
+    for (const h of expectedHouses) {
+      expect(drawnHouses.has(h)).toBe(true);
+    }
+  });
 });

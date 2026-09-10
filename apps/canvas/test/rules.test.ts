@@ -147,6 +147,17 @@ describe('updatePapers', () => {
     expect(h.resolved).toBe(true);   // no later "missed" event for this house
   });
 
+  it('scores nothing delivering to a mailbox after smashing that house\'s window', () => {
+    const w = ready();
+    const h = house({ subscriber: true });
+    thrownAt(w, h, 0.9);
+    expect(updatePapers(w, 1 / 30)).toEqual([{ type: 'windowSubscriber' }]);
+
+    thrownAt(w, h, 3.1);
+    expect(updatePapers(w, 1 / 30)).toEqual([]);
+    expect(h.delivered).toBe(false);
+  });
+
   it('scores nothing for smashing an already-broken window', () => {
     const w = ready();
     const h = house({ subscriber: false });
