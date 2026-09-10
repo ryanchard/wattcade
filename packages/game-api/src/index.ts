@@ -209,6 +209,20 @@ export interface GameModule {
    * the rider spinning at a machine that is not listening.
    */
   readonly needsCadence?: boolean;
+  /**
+   * True when this game's load is part of its design and the shell must send
+   * it ungeared.
+   *
+   * The shell owns a virtual gear — a cassette the rider shifts mid-ride to
+   * find a load their legs agree with — and it is applied to whatever
+   * `simulation()` returns. That is right for a game about effort and wrong
+   * for a game about cadence: Spin Cycle and Fish ask for thin air on purpose
+   * so that spinning is cheap and steering does not cost a sprint, and a gear
+   * that made spinning expensive would be taking the steering wheel away.
+   *
+   * Those games are single-speed. Every other game shifts.
+   */
+  readonly singleSpeed?: boolean;
   /** Empty means legs only, and the shell forwards no keyboard at all. */
   readonly controls: readonly ControlHint[];
   readonly palette: GamePalette;

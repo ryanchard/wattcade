@@ -101,6 +101,10 @@ export const fish: GameModule = {
   needsResistance: false,
   // Cadence is depth. Without it there is no up and no down.
   needsCadence: true,
+  // Single-speed, and not by accident. Cadence is the steering wheel here;
+  // a gear that made spinning expensive would make swimming up cost a
+  // sprint, which is exactly the trade this game was built to avoid.
+  singleSpeed: true,
   controls: [],
   // Deep water, one warm fish, and something glowing in the dark.
   palette: { base: '#12657f', accent: '#ff9d4d', detail: '#8ff0c4' },

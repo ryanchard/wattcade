@@ -104,6 +104,10 @@ export const spincycle: GameModule = {
   // Cadence IS the steering. A trainer that reports watts and no cadence
   // cannot fly this at all, and the hub says so before the rider starts.
   needsCadence: true,
+  // Single-speed, and not by accident. Cadence is the steering wheel here;
+  // a gear that made spinning expensive would make climbing cost a sprint,
+  // which is exactly the trade this game was built to avoid.
+  singleSpeed: true,
   controls: [],
   // A sunlit English afternoon: pale sky, brass and canvas, a hedgerow.
   palette: { base: '#bcdff2', accent: '#c98a3c', detail: '#78975b' },
