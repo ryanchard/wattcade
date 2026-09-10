@@ -15,6 +15,37 @@ environment this was written in, and nobody has yet watched either one
 render a frame. Where the brief asked for a ride report, this says so
 plainly instead of making one up.
 
+## The art is no longer comparable — read this before any visual claim
+
+**As of this writing, Version A and Version B do not look like the same
+game, and that gap is entirely unported artwork, not an engine difference.**
+Version A's placeholder box sprites were replaced (commit `08a4c22`) with
+real vector art: houses got pitched roofs with gable ends and overhanging
+eaves, mullioned window grids, doors and porches, varied per house; the
+rider became a kid on an actual bike with rolling wheels and a paper bag;
+cars gained a set-back cabin and headlights; the dog, bin, lawnmower,
+skater, and drain each got a distinct silhouette instead of sharing one
+cuboid; and mailbox flags now drop once a house is served. Its signature
+element is diegetic light — a lit subscriber house throws a warm porch-light
+pool onto its own lawn, painted in its own ground pass before the entity
+loop, so anything standing in the light is lit by it.
+
+Version B still draws every entity as a plain isometric box
+(`apps/phaser/src/views.ts`'s `box()`), unchanged since Task 21, with one
+small exception: the shared sprinkler-fairness fix (below) added a toggled
+droplet-spray overlay for sprinklers specifically, drawn in
+`drawSprinklerSprayView`. Everything else — houses, rider, cars, dog, bin,
+lawnmower, skater, drain — is still the original undifferentiated box.
+
+**Practically: any claim about which version "looks better," reads its
+street more legibly, or feels nicer to look at is not a comparison of
+Canvas versus Phaser right now — it's a comparison of finished art against
+placeholder art, on top of two different engines.** That comparison becomes
+meaningful again once the same art pass is ported to Version B (or dropped
+back to boxes on both sides for a controlled look). Until then, treat
+open question 3 below as blocked on that porting work, not just on someone
+sitting down to look.
+
 ## Why the comparison is fair
 
 Before any of the numbers below mean anything, it has to be true that both
@@ -48,6 +79,18 @@ are, and both come from earlier tasks in this project, not from this one:
   (`hazardHalfDepth` in `apps/canvas/src/rules.ts`, and the identical
   `kind === 'car' ? 4 : 1` expression duplicated in
   `apps/phaser/src/scenes/StreetScene.ts` and `apps/phaser/src/views.ts`).
+- **Sprinklers now cycle, and both engines agree on when they're dangerous.**
+  Sprinklers have always had a `phase` field driving a visual on/off cycle,
+  but collision used to treat every sprinkler as live on every frame — a
+  sprinkler drawn OFF could still crash you. `isHazardActive(spec, elapsed)`
+  in `packages/game-core` is now the single shared answer to "is this
+  sprinkler actually spraying right now" (3 s on, 2 s off, phase-offset per
+  sprinkler), and both engines' collision AND rendering consult it: Version
+  A's `detectCollision` and `drawSprinkler`, Version B's `#checkCollisions`
+  and the toggled spray overlay in `views.ts`. This is the shared-rules
+  boundary doing exactly the job it exists for — a fairness bug that would
+  otherwise have had to be found and fixed twice was fixed once, in the one
+  place both engines read from.
 
 Given that, Step 1 of the brief — ride both on seed `paperboy`, check same
 houses/subscribers/hazards/score — reduces to a claim about the shared
@@ -83,20 +126,26 @@ npm --workspace @paperboy/phaser run build
 
 | | Version A (canvas) | Version B (phaser) |
 |---|---|---|
-| JS chunk, minified | 31.39 kB | 1,511.51 kB |
-| JS chunk, gzipped | 11.47 kB | 349.21 kB |
+| JS chunk, minified | 44.92 kB | 1,512.24 kB |
+| JS chunk, gzipped | 16.13 kB | 349.53 kB |
 | `index.html` | 1.24 kB | 1.19 kB |
-| `dist/` total on disk | 36 K | 1.4 M |
+| `dist/` total on disk | 48 K | 1.4 M |
+
+(Re-measured after the art pass and the sprinkler-fairness fix. Version A's
+bundle grew from 31.39/11.47 kB to 44.92/16.13 kB — the cost of the new
+`render/entities.ts` and the expanded `render/primitives.ts`/`palette.ts`,
+below. Version B's is essentially unchanged, 1,511.51 → 1,512.24 kB — the
+sprinkler spray overlay is a handful of lines.)
 
 Version A ships almost nothing beyond its own code — `@paperboy/game-core`
 and `@paperboy/trainer` are its only dependencies, and both are workspace
 packages, not third-party ones. Version B's bundle is essentially "the
-Phaser library plus the game," and it shows: **the JS chunk is ~48x larger
-minified and ~30x larger gzipped**, even though the two apps' own source is
-roughly the same size (below). Phaser's default build was used as-is here —
-no manual-chunking, no arcade-physics-only trim, no WebGL-only build — so
-this is the bundle Version B ships today, not a floor on what's achievable
-with more build tuning.
+Phaser library plus the game," and it shows: **the JS chunk is ~34x larger
+minified and ~22x larger gzipped**, even with Version A's own JS now
+meaningfully larger post-art-pass. Phaser's default build was used as-is
+here — no manual-chunking, no arcade-physics-only trim, no WebGL-only
+build — so this is the bundle Version B ships today, not a floor on what's
+achievable with more build tuning.
 
 ### Dependency weight
 
@@ -109,7 +158,7 @@ broken down as `types/` 51 M, `plugins/` 43 M, `dist/` 34 M, `src/` 13 M,
 shipped bundle is the 1.51 MB minified figure above — but it's 146 M that
 now exists in `node_modules`, gets fetched on every clean install, and is
 one more security-advisory surface to track that Version A simply doesn't
-have.
+have. Unchanged by the art pass, since that work only touched Version A.
 
 ### Source lines outside the shared packages
 
@@ -117,10 +166,12 @@ have.
 find apps/<app>/src -name '*.ts' | xargs wc -l
 ```
 
+Re-measured after the art pass and the sprinkler-fairness fix:
+
 | | Version A (canvas) | Version B (phaser) |
 |---|---|---|
-| Files | 11 | 7 |
-| Total lines | 1,282 | 1,134 |
+| Files | 12 | 7 |
+| Total lines | 2,542 | 1,222 |
 
 Per file:
 
@@ -130,21 +181,37 @@ Per file:
 | `iso.ts` | 58 | | `iso.ts` | 40 |
 | `hud.ts` | 34 | | `scenes/HudScene.ts` | 47 |
 | `input.ts` | 60 | | | |
-| `rules.ts` | 215 | | `logic/run.ts` | 370 |
+| `rules.ts` | 222 | | `logic/run.ts` | 370 |
 | `session.ts` | 153 | | | |
 | `world.ts` | 191 | | `logic/entities.ts` | 100 |
-| `render/scene.ts` | 202 | | `scenes/StreetScene.ts` | 306 |
+| `render/scene.ts` | 146 | | `scenes/StreetScene.ts` | 347 |
 | `render/drawables.ts` | 62 | | | |
-| `render/primitives.ts` | 104 | | `views.ts` | 113 |
-| `render/palette.ts` | 33 | | | |
+| `render/entities.ts` | 909 | | `views.ts` | 160 |
+| `render/primitives.ts` | 373 | | | |
+| `render/palette.ts` | 164 | | | |
 
-Total app-level source is close either way (1,282 vs 1,134). What differs is
-*shape*: Version A spreads its logic across ten small, single-purpose files
-(none over 220 lines); Version B concentrates a third of its own code
-(370 + 306 = 676 of 1,134 lines) into two large files — `logic/run.ts` (the
-run model: physics, scoring, paper flight, house resolution) and
+The two apps' source is no longer close to the same size. Version A grew
+from 1,282 to 2,542 lines — essentially all of it (+1,260 lines) in the
+rendering layer: a new 909-line `render/entities.ts` (one draw function per
+entity kind, per the silhouette-first art pass) plus growth in
+`render/primitives.ts` (104 → 373, new shape primitives: `prism`, `wheel`,
+`groundGlow`, `pointGlow`, `uprightEllipse`) and `render/palette.ts`
+(33 → 164, more colours and the `hashPick` variant tables the art uses for
+per-house/per-hazard silhouette variety). None of Version A's non-rendering
+logic (`world.ts`, `session.ts`, `iso.ts`) changed size at all; `rules.ts`
+grew by 7 lines for the `isHazardActive` gate.
+
+Version B grew more modestly, from 1,134 to 1,222 lines, entirely from the
+sprinkler-fairness fix: `StreetScene.ts` (306 → 347) gained the
+`isHazardActive` gate on both collision and the spray-visibility toggle,
+and `views.ts` (113 → 160) gained the droplet-spray overlay. Its *shape*
+point still stands unchanged from before the art pass: Version A spreads
+its logic across many small, single-purpose files; Version B still
+concentrates a large fraction of its own code (370 + 347 = 717 of 1,222
+lines) into two large files — `logic/run.ts` (the run model) and
 `scenes/StreetScene.ts` (streaming absorption, entity lifecycle, position
-sync, and collision, all in one `update()` method).
+sync, and collision, all in one `update()` method) — the same structural
+observation as before, just with slightly larger numbers.
 
 ### Tests
 
@@ -152,50 +219,83 @@ sync, and collision, all in one `update()` method).
 npm test    # whole repo
 ```
 
-Whole-repo suite: **297 tests passing, 1 skipped**, across 22 test files.
-The one skip is a real-hardware test gated on a KICKR capture file that
-doesn't exist yet in this environment
-(`packages/trainer/test/replaySource.test.ts`) — not a failure, an
-unmet precondition. Reproduced directly by running `npm test` above; matches
-the count already on record from Task 21.
+Whole-repo suite, re-run after the art pass and the sprinkler-fairness fix:
+**309 tests passing, 1 skipped**, across 24 test files (up from 297/1 across
+22 files). The one skip is still a real-hardware test gated on a KICKR
+capture file that doesn't exist yet in this environment
+(`packages/trainer/test/replaySource.test.ts`) — not a failure, an unmet
+precondition, unaffected by either recent change.
 
 Per app:
 
 | | Version A (canvas) | Version B (phaser) |
 |---|---|---|
-| Test files | 5 | 2 |
-| Tests | 105 | 39 |
-| Test source lines | 1,087 | 400 |
+| Test files | 5 | 3 |
+| Tests | 106 | 43 |
+| Test source lines | 1,109 | 495 |
 
-Version A has roughly 2.7x as many app-level tests as Version B, and almost
-3x the test source, for a slightly *larger* app. That's not because Version
-B was tested less carefully — it's because most of Version B's app-specific
-code cannot be unit-tested at all (next section).
+Version B's test files went from 2 to 3 (`hazardActive.test.ts`, 95 lines,
+verifying the shared `isHazardActive` gate at the exact point
+`#checkCollisions` consults it — see below) and Version A's `rules.ts`
+gained one test alongside its `isHazardActive` gate. Version A still has
+roughly 2.5x as many app-level tests as Version B and a bit over 2x the test
+source. That gap exists for the same reason as before: most of Version B's
+app-specific code cannot be unit-tested at all (next section) — and, as of
+the art pass, that's now also true for most of Version A's *new* code, just
+for a different reason (it's drawing code, not scene-lifecycle code).
 
 ### How much of each app's source is actually under test
 
 "Under test" here means: the file is imported and directly exercised by a
-test file, not merely reachable through some chain of imports.
+test file, not merely reachable through some chain of imports. Re-measured
+after both apps changed:
 
-**Version A** — tested: `iso.ts` (58), `world.ts` (191), `rules.ts` (215),
-`session.ts` (153), `render/drawables.ts` (62) = **679 of 1,282 lines
-(53%)**. Untested: `main.ts` (170), `hud.ts` (34), `input.ts` (60),
-`render/scene.ts` (202), `render/primitives.ts` (104), `render/palette.ts`
-(33) = 603 lines (47%) — DOM wiring, keyboard/menu glue, and the actual
-`CanvasRenderingContext2D` drawing calls. None of that untested code is
-where the interesting bugs were; both real bugs found in review (panic key,
-120 Hz freeze) lived in `main.ts`/`session.ts`, in code that *is* covered —
-`session.test.ts`'s `effectiveSimulation` and `advanceFixed` tests are what
-pin those fixes today.
+**Version A** — tested: `iso.ts` (58), `world.ts` (191), `rules.ts` (222),
+`session.ts` (153), `render/drawables.ts` (62) = **686 of 2,542 lines
+(27%)**. Untested: `main.ts` (170), `hud.ts` (34), `input.ts` (60),
+`render/scene.ts` (146), `render/entities.ts` (909), `render/primitives.ts`
+(373), `render/palette.ts` (164) = 1,856 lines (73%).
+
+This is a large swing from before the art pass, where Version A's tested
+fraction was 53%. Nothing about what's tested changed — the same five files
+(`iso.ts`, `world.ts`, `rules.ts`, `session.ts`, `render/drawables.ts`) are
+still the ones with tests, and neither real bug this project has found in
+Version A (the panic key, the 120 Hz freeze) lived outside them. What
+changed is that essentially all 1,260 new lines landed in the untested
+bucket, because they're `CanvasRenderingContext2D` drawing calls — the kind
+of code a unit test can assert makes a certain sequence of `fill()` calls,
+but not that the result looks like a house. Version A's coverage *ratio*
+dropping is a direct, mechanical consequence of adding real art, not a sign
+that anything got less careful.
 
 **Version B** — tested: `logic/entities.ts` (100), `logic/run.ts` (370) =
-**470 of 1,134 lines (41%)**. Untested: `iso.ts` (40), `main.ts` (158),
-`views.ts` (113), `scenes/HudScene.ts` (47), `scenes/StreetScene.ts` (306) =
-664 lines (59%). The untested fraction is larger in absolute terms and as a
-share of the app, and it's concentrated in exactly the file that matters
-most structurally: `StreetScene.ts` (306 lines, the single largest file in
-either app) does entity streaming, position sync, *and* collision detection
-in one `update()` method, and none of it has a test.
+**470 of 1,222 lines (38%)**. Untested: `iso.ts` (40), `main.ts` (158),
+`views.ts` (160), `scenes/HudScene.ts` (47), `scenes/StreetScene.ts` (347) =
+752 lines (62%). `hazardActive.test.ts` was deliberately not counted as
+"testing" `StreetScene.ts` here, even though it exists specifically to pin
+the fix inside `#checkCollisions` — it imports only `isHazardActive` from
+`@paperboy/game-core` and hand-reproduces `#checkCollisions`'s box-overlap
+arithmetic alongside it (the same technique Task 21's fix report used for
+the hazard-depth sweep), rather than exercising the real `StreetScene`
+class, for the same reason as always: a live `Phaser.Scene` can't be
+constructed headlessly here. It's a real, working proof that the gate is
+wired correctly at that call site — just not a test of `StreetScene.ts`
+itself, which is why the raw line-coverage number doesn't move for it.
+
+Two things are worth naming together here. First, **Version B's tested
+percentage (38%) is now closer to Version A's (27%) than it was before the
+art pass (41% vs 53%)** — not because Version B got more rigorously tested,
+but because Version A's growth was concentrated entirely in inherently
+visual code that was never going to be unit-testable regardless of engine.
+Second, **in absolute terms the gap is still wide and in Version A's
+favour**: 1,856 untested lines for Version A versus 752 for Version B.
+Version A has far more untested code today, but almost none of it is
+structurally central — it's draw calls. Version B's smaller pile of
+untested code is still concentrated in the one file that matters most:
+`StreetScene.ts` (347 lines, still the largest file in either app) does
+entity streaming, position sync, *and* collision detection in one
+`update()` method, and none of that method has a test that exercises the
+real class.
 
 This isn't for lack of trying. Task 21's fix report records a real attempt
 to get a headless `Phaser.Game` running under `happy-dom` so `StreetScene`
@@ -212,21 +312,36 @@ a test, for the same reason: nothing in the suite touches that file.
 
 ## Where Phaser saved work, and where it didn't
 
-**Saved:** depth sorting is genuinely free in Version B. Every drawable
-container gets `setDepth(lateral - distance)` once, and Phaser's own display
-list handles draw order from then on (`StreetScene.ts`'s `#place`, one
-line: `container.setDepth(...)`). Version A has to rebuild and sort a fresh
-array every single frame — `collectDrawables()`
+**Saved — but more narrowly than it first looks.** Depth is **not** assigned
+once in Version B; `#place()` in `apps/phaser/src/scenes/StreetScene.ts` is
+called every frame, for every static, hazard, paper and the rider, via
+`#syncPositions()`, and it recomputes `setDepth(lateral - distance)` every
+single time. It has to — hazards move, papers fly, the rider steers — so
+depth is reassigned at exactly the same per-frame frequency as Version A's
+`collectDrawables()`. There is no per-frame cost saving here; both engines
+redo this work every frame for every visible entity.
+
+What Phaser genuinely removes is the *sort and the array bookkeeping around
+it*, not the per-frame recomputation. Version A's `collectDrawables()`
 (`apps/canvas/src/render/drawables.ts`) walks every house, hazard, stack and
-paper, computes a `depthKey`, and calls `.sort()` on the result, every
-frame, whether or not anything moved relative to anything else. Scene
-composition is also close to free: `HudScene.ts` is a second `Phaser.Scene`
-that reads `StreetScene.run` and renders text, wired in with nothing more
-than `scene: [street, new HudScene()]` in the `Phaser.Game` constructor —
-though it's worth noting Version A's equivalent, `drawHud()`, is a single
-34-line function called after `renderFrame()`, so the two approaches land at
-about the same line count (34 vs 47) for the same feature; the win here is
-conceptual separation, not code saved.
+paper into a fresh array, computes a `depthKey` for each, and calls a single
+explicit `.sort()` on the whole array every frame, then hands that ordered
+list to the renderer. Version B skips the array-and-sort step entirely:
+each `Container` just states its own depth via `setDepth()`, and Phaser's
+display list keeps itself ordered without any code in `StreetScene.ts`
+having to gather everything into one place and sort it. That's a real
+convenience — one call per entity instead of a call per entity *plus* a
+sort over the whole set — but it's a smaller win than "sorted once and
+never touched again" would imply, and it does not change the fact that both
+engines touch every visible entity's depth every single frame.
+
+Scene composition is also close to free: `HudScene.ts` is a second
+`Phaser.Scene` that reads `StreetScene.run` and renders text, wired in with
+nothing more than `scene: [street, new HudScene()]` in the `Phaser.Game`
+constructor — though it's worth noting Version A's equivalent, `drawHud()`,
+is a single 34-line function called after `renderFrame()`, so the two
+approaches land at about the same line count (34 vs 47) for the same
+feature; the win here is conceptual separation, not code saved.
 
 **Didn't save, or actively cost:**
 
@@ -249,9 +364,50 @@ conceptual separation, not code saved.
   numbers used for everything else. Phaser's physics engine, in other
   words, required inventing a coordinate system Version A didn't need,
   purely to have somewhere for Arcade to do its overlap test.
-- *Headless testability.* Covered above — 59% of Version B's app source is
+- *Headless testability.* Covered above — 62% of Version B's app source is
   effectively untestable without a real browser, concentrated in the file
   doing the most structurally important work.
+
+## What the art pass cost Version A's redraw-every-frame model
+
+Version A's rendering is immediate-mode: `renderFrame()` walks
+`collectDrawables()`'s sorted list and reissues canvas draw calls for every
+visible entity, every frame, regardless of whether anything about that
+entity changed since the last frame. Before the art pass a house was one
+`box()` call — three filled paths (two walls, one roof-as-flat-top). The art
+pass's own commit message describes the new house as "~30 filled paths
+rather than one box," and a direct count run against the current
+`drawHouse()` (sampling twelve synthetic house ids to catch every
+combination of the two per-house random variants — a 1-in-3 cross gable and
+a 1-in-2 chimney) puts it at **41 to 50 filled `fill()` calls per house**,
+not ~30: the commit's own estimate under-counted the decorated variants
+(cross gable, chimney, the window grid, porch, and mailbox flag) that push
+a fully-dressed house well past its plainest form.
+
+That per-entity cost multiplied by "every visible entity, every frame" is
+exactly why the same commit also added a screen-space X cull to
+`renderFrame()` (`offScreenX()` in `apps/canvas/src/render/scene.ts`):
+`collectDrawables()` culls a generous, camera-independent 260 m ahead, but
+the isometric projection is parallel, so a house 260 m up the street is
+drawn at full size roughly 3,400 px off the right edge of a typical
+viewport — work `fill()` would still pay for if nothing skipped it. Adding
+that cull is reported (same commit message) to have roughly halved the
+frame's total canvas calls on a full street, from 6,973 to 3,775. That
+specific pair of numbers comes from the commit's own measurement, not one
+reproduced here, and it was already checked and confirmed accurate.
+
+The structural point stands regardless of the exact figures: Version A's
+cost model was always "draw everything visible, every frame," and that was
+a cheap promise to make when an entity was three filled paths. It's a much
+more expensive promise now that a house is 41-50, and the fix so far has
+been a smarter cull, not a change to the underlying pull-every-frame
+architecture. Version B's push model — draw a `Graphics` once at creation,
+then only reposition it — doesn't pay this particular tax at all; adding
+comparably detailed art to Version B's boxes would cost more *once*, at
+creation, rather than on every frame for every visible instance. This is
+the clearest concrete case in either codebase where the two architectures'
+costs would actually diverge under load, and it is a direct consequence of
+Version A now having real art to draw.
 
 ## Collision: both ended up in world space anyway
 
@@ -292,27 +448,40 @@ remove that duplication; it added a third copy of it.
 This is a judgement call, not a measurement, and it's made from reading the
 code, not from playing either game.
 
-I'd rather extend Version A. Three things point that way: it has no
-external dependency to track or upgrade; a larger share of its logic sits
-behind tests (53% vs 41%), and the untested remainder is boilerplate (DOM
-wiring, canvas draw calls) rather than anything structurally central; and
-its logic is spread across small, single-purpose files where a change to,
-say, hazard behaviour touches `world.ts`/`rules.ts` and nothing else.
-Version B's equivalent change would likely touch `logic/run.ts` and
-`scenes/StreetScene.ts` together — the run model and the untested scene
-file that owns collision, streaming, and position sync all at once — which
-is a wider, less-verifiable blast radius for the same size of change.
+I'd still rather extend the *rules layer* of Version A, but the art pass has
+made this a more mixed call than it was, and it's worth saying so rather
+than repeating the earlier answer unchanged. The coverage percentages no
+longer point the same direction they did: Version A's tested share dropped
+to 27%, Version B's is now the higher of the two at 38%. That swing is
+mechanical, not a real quality signal — it happened because Version A's
+growth was concentrated in categorically untestable drawing code — but it
+does mean "more of its logic sits behind tests" is no longer a clean
+argument for Version A the way it was. What still points to Version A: no
+external dependency to track or upgrade, a rules layer (`world.ts`,
+`rules.ts`, `session.ts`) that hasn't grown or changed shape at all and is
+still spread across small, single-purpose files, and — in absolute terms —
+its untested code is boilerplate (DOM wiring, canvas draw calls) rather
+than anything structurally central, versus Version B's smaller but more
+concentrated untested block sitting inside the one file
+(`scenes/StreetScene.ts`) that does streaming, position sync, and collision
+all at once. A change to hazard *behaviour* still touches only
+`world.ts`/`rules.ts` in Version A versus `logic/run.ts` and
+`scenes/StreetScene.ts` together in Version B. A change to hazard *art*,
+though, now means touching a 909-line file (`render/entities.ts`) that has
+no tests at all, in either version's sense of the word — that part of
+Version A is no longer meaningfully smaller or simpler to extend than
+Version B's untested scene code, just untestable for a different reason.
 
-That said, this cuts the other way as the game grows more visually
-ambitious. Version A's cost model for a new visual feature is "draw it
-every frame, forever" — `collectDrawables()` and `renderFrame()` both scale
-with however many entities are on screen, every frame, whether or not
-anything changed. Version B's cost model is "create it once, then it's
-handled" — a new entity kind gets a `Graphics` drawn once and repositioned
-thereafter, and depth sorting is free. For a game that stays about this
-visually simple, that difference doesn't matter much; for one that grows
-particle effects, animation, or many more simultaneously visible entities,
-it would start to.
+The visual cost-model asymmetry from the previous section reinforces the
+same point from a different angle: Version A's "draw it every frame,
+forever" model was cheap to extend when an entity was three filled paths,
+and is measurably less cheap now that a house is 41-50. Version B's
+"create it once, then reposition and let the display list keep it sorted"
+model doesn't pay a per-frame tax for detail the way Version A's does. For
+a game that stays about this visually simple, none of this changes the
+day-to-day experience of extending either codebase much; for one that
+keeps adding detail per entity, Version B's model has more headroom left
+in it than Version A's.
 
 I'm also not weighting this against how either version actually plays,
 because I don't know — that's the whole point of the open questions below.
@@ -327,22 +496,33 @@ nothing below should be read as a prediction of the answer:
    Version B — both dev servers were left running for this purpose and were
    not stopped) on the same seed and same input pattern, and pay attention
    to whether any difference in feel traces to frame pacing, the depth
-   sort, camera behaviour, or just the art — the brief's own framing for
-   what to listen for.
+   sort, or camera behaviour — the brief's own framing for what to listen
+   for. **"Or just the art" is no longer a fair fourth option right now**:
+   see the art-parity note near the top of this document. Version A has
+   finished vector art and Version B still has placeholder boxes, so any
+   difference that traces to "the art" today is a known, already-explained
+   gap, not a discovery — it will need re-asking once Version B's art is
+   ported.
 2. **Frame time under load.** Chrome DevTools Performance panel, ten
    seconds of riding through a busy block (several hazards, houses, and
    in-flight papers on screen at once), median frame time for each version.
    Given the bundle-size and dependency gap above, it's plausible Version B
    costs more per frame even with fewer draw calls at steady state — plausible,
    not measured; only a real profile settles it.
-3. **Visual/state agreement at the rendering layer.** Ride both on seed
-   `paperboy` through the first three blocks and confirm houses land in the
-   same places, the same houses are subscribers, the same hazards appear
-   in the same places, and the same throws score the same amount. The
-   shared-layer state driving all four is already known to be bit-exact
-   (see above); what's unverified is whether each engine's *renderer*
-   draws that shared state correctly — a wrong lane, a swapped colour, a
-   depth-sort glitch that only shows up with specific entity overlaps.
+3. **Visual/state agreement at the rendering layer — currently blocked on
+   the art gap, not just unverified.** Ride both on seed `paperboy` through
+   the first three blocks and confirm houses land in the same places, the
+   same houses are subscribers, the same hazards appear in the same places,
+   and the same throws score the same amount. The shared-layer state
+   driving all four is already known to be bit-exact (see above); what's
+   unverified is whether each engine's *renderer* draws that shared state
+   correctly — a wrong lane, a swapped colour, a depth-sort glitch that only
+   shows up with specific entity overlaps. That check is still meaningful
+   for *positions* (does a house/hazard/paper sit where the shared state
+   says it should) even with mismatched art, but any comparison of how
+   correct-looking or legible the two scenes are is not answerable until
+   Version B's art matches Version A's — see the note near the top of this
+   document.
 4. **Memory behaviour over a long ride.** Version B explicitly destroys
    streamed-out `Container`/`Zone` pairs in `StreetScene.ts` as the
    `BlockStreamer` reports removals; nothing in this environment can confirm
