@@ -5672,8 +5672,10 @@ function resolveLanding(
     return { type: 'windowNonSubscriber' };
   }
 
-  // mailbox or porch
-  if (!house.spec.subscriber || house.delivered) return null;
+  // mailbox or porch. `resolved` matters as much as `delivered`: smashing a
+  // subscriber's window cancels them, and without this check you could take
+  // the penalty and then still score a full delivery to the same house.
+  if (!house.spec.subscriber || house.delivered || house.resolved) return null;
   house.delivered = true;
   house.resolved = true;
   return band === 'mailbox' ? { type: 'mailbox' } : { type: 'porch' };
@@ -5947,7 +5949,11 @@ export const PALETTE = {
   sidewalk: '#b9b2a6',
   lawn: '#5f7a5a',
   curb: '#8d8779',
+  // Subscribers get the warm hues, non-subscribers the cool ones. The
+  // difference must be in HUE, not just brightness: this colour coding is how
+  // a rider picks targets at speed, and a dimmed ochre still reads as ochre.
   houseWall: ['#c47a4e', '#a8623f', '#9c8552', '#7d6b53', '#b0855c'],
+  houseWallCool: ['#5f6672', '#6d7480', '#565c66'],
   houseRoof: ['#4a3b33', '#3d3129', '#55443a'],
   subscriberGlow: '#ffd98a',
   mailboxSubscriber: '#4f9dd6',
