@@ -7873,6 +7873,13 @@ export class PaperboyRun {
       Math.min(RIDABLE_MAX, this.rider.lateral + input.steer * STEER_RATE * dt),
     );
 
+    // Stream BEFORE physics. Version A's stepWorld calls ensureBlocks first
+    // for the same reason: read the grade from a block list that does not yet
+    // contain block 0 and the rider spends their first frame on flat ground,
+    // which diverges from Version A for identical seed and inputs.
+    const stream = this.streamer.update(this.rider.distance);
+    this.#absorb(stream);
+
     const next = stepPhysics(
       { speed: this.rider.speed, distance: this.rider.distance },
       {
@@ -7887,9 +7894,6 @@ export class PaperboyRun {
     this.rider.speed = next.speed;
     this.rider.distance = next.distance;
     this.elapsed += dt;
-
-    const stream = this.streamer.update(this.rider.distance);
-    this.#absorb(stream);
 
     if (input.throwPaper) this.throwPaper();
 
