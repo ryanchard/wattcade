@@ -337,7 +337,7 @@ export const FEINTER: RivalSpec = {
 
 export const WHEELSUCKER: RivalSpec = {
   id: 'wheelsucker',
-  name: 'Fonz',
+  name: 'Ryan',
   line: 'Has not led a lap since 2019. Has not needed to.',
   tell: 'However slowly you ride, they will not come past. They are waiting.',
   counter: 'Force the pace, or play chicken and jump before they do.',
