@@ -1,0 +1,242 @@
+# Wattcade
+
+Small arcade games you play by pedalling a real bike trainer. Your power and
+cadence are the controller: the browser reads them over Web Bluetooth, and the
+games read them instead of a gamepad.
+
+The trainer is an output as well as an input. Each game declares the road it
+wants — a grade, a headwind — and the shell sends that back down to the
+trainer, so a hill gets heavier under your legs and slipping into somebody's
+draft goes quiet. The resistance is the point; the pictures are there to tell
+you why it changed.
+
+**You do not need a trainer to try it.** There is a keyboard fallback: hold
+`W` and the app synthesises power and cadence, so all five games are playable
+on a laptop with no hardware at all. Nothing will push back at you, but
+everything runs.
+
+> **A note on the name.** The repository directory is still called
+> `PaperBoy` and the internal packages are still scoped `@paperboy/*`. That is
+> where this started — one game — and it grew into five. The product is
+> Wattcade. Nothing has been renamed on disk, so the mismatch is expected
+> rather than a mistake.
+
+## The games
+
+| Game | What you do | Controlled by | Wants cadence | Wants resistance |
+| --- | --- | --- | --- | --- |
+| Paperboy | Ride the round before sunrise and hit the subscribers' porches. | Power, plus left/right and space | – | Yes |
+| The Pack | Dogs latch on and drag you back; sprint above your FTP long enough to throw one off. | Power only | – | Yes |
+| Velodrome | Four laps against a rival, up a ladder of six. Sit in their shelter and the air costs you about 26% less. | Power only | – | Yes |
+| Spin Cycle | Fly a pedal-powered flying machine. Spin faster to climb, slower to sink, 80 rpm to hold level. | Cadence | Yes | – |
+| Fish | You are a fish. Cadence is your depth. Eat anything smaller than you; get away from anything bigger. | Cadence | Yes | – |
+
+Paperboy is the only game with buttons. The Pack and Velodrome are legs-only
+by construction: they declare no controls, so the shell never forwards a
+keystroke to them at all.
+
+Games marked as wanting cadence are unplayable on a trainer that reports power
+and nothing else — some do. Games marked as wanting resistance still run on a
+read-only trainer, but the thing they are about goes missing: Velodrome's
+draft is the trainer easing off, and if it cannot ease off there is not much
+race left. The hub warns you on the relevant cards once it knows what your
+trainer can do, rather than letting you find out four minutes into a climb.
+
+Every game sits under the same status band, drawn by the shell: what the
+trainer can do, your watts, your cadence, and the clock, always in the same
+places. Cadence shows an em dash rather than a zero when the trainer reports
+none, because "not pedalling" and "this machine has no cadence sensor" are
+different facts.
+
+## What you need
+
+- **A smart trainer that speaks FTMS** (the Bluetooth Fitness Machine
+  Service). Almost everything sold in the last several years does.
+- **Chrome or Edge**, on desktop. Safari and Firefox do not implement Web
+  Bluetooth and are not supported — there is no polyfill and no workaround;
+  the pairing button simply cannot exist there. On Linux you may also need
+  `chrome://flags/#enable-experimental-web-platform-features`.
+- **A secure context.** Web Bluetooth needs HTTPS or `localhost`. The dev
+  server and a GitHub Pages URL both qualify.
+- **Nothing else holding the trainer.** A trainer pairs to one application at
+  a time. Close Zwift, close the manufacturer's app, and close any other tab
+  running Wattcade before you connect.
+
+Developed and tested against a **Wahoo KICKR**. Other FTMS trainers implement
+the same service and should work, but none have been tried — if yours does
+something odd, that is worth an issue.
+
+## Quick start
+
+```sh
+git clone <this repo>
+cd PaperBoy
+npm install
+npm run dev
+```
+
+Open the URL it prints — `http://localhost:5185` — enter your FTP, sprint
+power and weight, then either connect a trainer or press **Ride from the
+keyboard** and hold `W`.
+
+Running the checks:
+
+```sh
+npm test         # the whole suite, headless, no browser and no hardware
+npm run typecheck
+npm run build    # production build of the arcade into apps/arcade/dist
+```
+
+One test is skipped by design: it decodes a recorded KICKR capture, and
+activates by itself if somebody runs the probe in `tools/ble-probe` and
+commits one.
+
+## Safety
+
+This software changes the resistance of a machine you are sitting on, so the
+rules it follows are worth stating plainly.
+
+- **Grade is clamped to ±8%** in the FTMS encoder itself, on every path. There
+  is no code route that can ask the trainer for a steeper hill, because the
+  clamp is not in the games or in the shell — it is in the last function
+  before the bytes go out.
+- **Escape stops the ride and P pauses it.** Both work in every game, and
+  both leave the trainer flat. They belong to the shell, not to the games, so
+  no game can fail to implement them.
+- **One write per frame, and flat whenever you are not being asked to push.**
+  Paused, finished, tab hidden, screen asleep, page closing: every one of
+  those makes the value sent a flat road, regardless of what the game asked
+  for. An earlier version of this project let each game write to the trainer
+  itself, and shipped a panic key whose zero was overwritten milliseconds
+  later by the game's own loop. That is why the shell now owns every write,
+  and why `apps/arcade/test/ride.test.ts` exists.
+- **The honest limit:** the reset on page close is best-effort. A browser will
+  not wait for a Bluetooth write while it is unloading a page, so if you close
+  the tab mid-climb the trainer may keep the last grade it was given. It is
+  clamped, so it will not be dangerous, but it may feel stuck. Reconnect —
+  connecting sends a flat road — or power-cycle the trainer, and it clears.
+
+None of this makes a bike trainer a safe place to stop concentrating. Warm up,
+and get off the bike the way you normally would.
+
+## How it is built
+
+An npm workspace, TypeScript throughout, strict mode, no framework and no
+third-party runtime dependencies in the arcade.
+
+| Path | What lives there |
+| --- | --- |
+| `packages/trainer` | Everything Bluetooth: GATT, FTMS decoding, the control-point writer, the road physics. |
+| `packages/game-api` | Types only. The contract between the shell and a game. |
+| `packages/game-core` | Shared game plumbing: seeded RNG, persistence, difficulty. |
+| `packages/game-*` | The five games. |
+| `apps/arcade` | The shell. One page that owns the trainer and hands it to a game. |
+| `apps/phaser` | A second build of Paperboy on Phaser 3, kept as a comparison artifact. Not in the arcade. |
+| `tools/ble-probe` | A scratch page for reading what a trainer actually advertises. |
+
+The split exists for one reason: **no game touches Bluetooth.** A game does
+not open a connection, does not write to the trainer, does not call
+`requestAnimationFrame`, does not read the clock and does not touch the DOM
+beyond the canvas context it is handed. It advances when told, draws when
+told, and *declares* the resistance it would like. The shell decides what is
+actually sent, because the shell is the only thing that knows whether you are
+paused, whether the tab is hidden, or whether anybody is on the bike.
+
+The practical payoff is that the games are pure functions of power, cadence
+and time, so the entire suite runs in Node with no browser and no hardware.
+
+## Adding a game
+
+Implement `GameModule` from `@paperboy/game-api`, add it to
+`apps/arcade/src/catalog.ts`, and you are done. The shell handles the frame
+loop, the fixed-step timing, the power easing, the trainer connection, the
+pause and stop keys, the status band, the results card and the high score
+table.
+
+```ts
+export interface GameModule {
+  readonly id: string;
+  readonly name: string;
+  readonly blurb: string;
+  /** True when this game is materially worse without resistance control. */
+  readonly needsResistance: boolean;
+  /** True when this game steers on cadence. */
+  readonly needsCadence?: boolean;
+  /** Empty means legs only, and the shell forwards no keyboard at all. */
+  readonly controls: readonly ControlHint[];
+  readonly palette: GamePalette;
+  create(opts: GameCreateOptions): GameSession;
+}
+
+export interface GameSession {
+  /** One fixed substep, with power the shell has already eased. */
+  advance(dtSeconds: number, powerWatts: number): void;
+  render(ctx: CanvasRenderingContext2D, width: number, height: number): void;
+  /** The road this game WANTS. The shell decides what is really sent. */
+  simulation(): SimulationParams;
+  readonly isOver: boolean;
+  stop(): void;
+  result(): RunResult;
+  hud(): readonly HudLine[];
+  /** Optional: real time for parallax and camera, never for gameplay. */
+  animate?(dtSeconds: number, width: number, height: number): void;
+  /** Optional, and only forwarded if `controls` is non-empty. */
+  handleKeys?(keys: GameKeys): void;
+  /** Optional: cadence in rpm, or null when the trainer reports none. */
+  setCadence?(rpm: number | null): void;
+}
+```
+
+The full contract, with the reasoning behind each field, is in
+[`packages/game-api/src/index.ts`](packages/game-api/src/index.ts). Games can
+also draw their own poster for the hub card and offer pre-run variants; both
+are optional.
+
+## Status, honestly
+
+These are working prototypes built quickly, not a product.
+
+- The games are barely tuned. Numbers were picked to be roughly plausible and
+  then left alone.
+- Most of them have never been properly ridden. Anything below about "it runs
+  and the maths is tested" is an untested claim.
+- There is no fatigue model. Nothing in any game knows or cares that you went
+  too deep four minutes ago, so pacing — the actual skill in cycling — costs
+  you nothing yet. This is the biggest gap.
+- The high score table is per-browser `localStorage`. There is no account, no
+  server and no sync.
+
+## Canvas versus Phaser
+
+Paperboy was deliberately built twice — once by hand in Canvas 2D, once on
+Phaser 3 — over the same physics and rules packages, so that the only
+differences were engine decisions. [`docs/superpowers/bake-off.md`](docs/superpowers/bake-off.md)
+is the write-up: bundle sizes, line counts, what each engine gave for free and
+what it charged for, and an explicit account of which claims are measurements
+and which are not. Worth reading if you are weighing a 2D engine against
+writing it yourself.
+
+## Deploying
+
+`.github/workflows/deploy.yml` builds the arcade and publishes it to GitHub
+Pages on every push to `main`.
+
+**It will not deploy until you enable Pages by hand:** repository
+**Settings → Pages → Source: GitHub Actions.** Until that is set the workflow
+runs, builds, and fails at the deploy step.
+
+Vite's `base` is `'./'`, so the bundle works from any path — which a project
+site needs, being served from `user.github.io/<repo>/` rather than a domain
+root. A useful side effect: the built `index.html` also works opened directly
+as a file, so a downloaded copy is playable on the keyboard. Web Bluetooth
+needs a secure context, so a real trainer still requires the hosted URL or
+`localhost`.
+
+## Screenshots
+
+There are none yet. `docs/images/` is where they go when somebody with a
+screen and a pair of legs takes them.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

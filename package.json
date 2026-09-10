@@ -7,7 +7,12 @@
     "apps/*",
     "tools/*"
   ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
+    "dev": "npm --workspace @paperboy/arcade run dev",
+    "build": "npm --workspace @paperboy/arcade run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
