@@ -1,0 +1,65 @@
+# Build the arcade and publish it to GitHub Pages.
+#
+# The site will not appear until Pages is switched on for the repository:
+# Settings -> Pages -> Source: GitHub Actions. Until then this workflow runs,
+# builds, and fails at the deploy step with a "Pages is not enabled" error.
+#
+# A project site is served from https://<user>.github.io/<repo>/, so the
+# bundle's asset URLs must be relative. They are: the arcade's Vite config
+# sets `base: './'`. Nothing here needs to know the repository name.
+name: Deploy the arcade to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # So a first deploy can be triggered by hand, straight after enabling Pages,
+  # without having to invent a commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time. Runs that pile up behind the one in flight collapse to
+# the latest, but the run in flight is never cancelled: a deployment killed
+# halfway is the one way to leave the live site broken.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the `engines` floor in package.json.
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The tests are fast and entirely headless. If they fail, nothing ships.
+      - run: npm test
+      - run: npm run typecheck
+
+      - run: npm --workspace @paperboy/arcade run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/arcade/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
