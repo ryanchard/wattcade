@@ -25,14 +25,6 @@ export interface HazardSpec {
   moving: boolean;
 }
 
-export interface SurfaceSpec {
-  distance: number;
-  length: number;
-  lateral: number;
-  width: number;
-  kind: 'grass' | 'curb';
-}
-
 export interface StackSpec {
   id: string;
   distance: number;
@@ -46,10 +38,16 @@ export interface BlockSpec {
   gradePercent: number;
   houses: HouseSpec[];
   hazards: HazardSpec[];
-  surfaces: SurfaceSpec[];
   stacks: StackSpec[];
 }
 
+/**
+ * The rider's full lateral width, in metres. The single shared definition
+ * both apps derive their collision half-width / zone width from —
+ * apps/canvas/src/rules.ts's RIDER_HALF_WIDTH and the width Version B's
+ * StreetScene.ts gives the rider's Arcade zone — instead of each
+ * independently hardcoding it.
+ */
 export const RIDER_WIDTH_M = 0.8;
 export const RIDABLE_MIN = 2.0;
 export const RIDABLE_MAX = 9.5;
@@ -192,23 +190,6 @@ export function generateBlock(seed: number, index: number): BlockSpec {
     hazards.push(candidate);
   }
 
-  const surfaces: SurfaceSpec[] = [
-    {
-      distance: startDistance,
-      length: BLOCK_LENGTH_M,
-      lateral: 2.25,
-      width: 1.5,
-      kind: 'grass',
-    },
-    {
-      distance: startDistance,
-      length: BLOCK_LENGTH_M,
-      lateral: 5.0,
-      width: 1.0,
-      kind: 'curb',
-    },
-  ];
-
   const stacks: StackSpec[] = [];
   if (index === 0 || rng() < 0.55) {
     stacks.push({
@@ -225,7 +206,6 @@ export function generateBlock(seed: number, index: number): BlockSpec {
     gradePercent,
     houses,
     hazards,
-    surfaces,
     stacks,
   };
 }

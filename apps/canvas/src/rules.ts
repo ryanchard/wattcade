@@ -1,5 +1,6 @@
 import {
-  BLOCK_LENGTH_M, applyScoreEvent, classifyLanding, isHazardActive,
+  BLOCK_LENGTH_M, RIDER_WIDTH_M, applyScoreEvent, classifyLanding,
+  isHazardActive,
 } from '@paperboy/game-core';
 import type { HazardKind, LandingOutcome, ScoreEvent } from '@paperboy/game-core';
 import type { RiderProfile } from '@paperboy/trainer';
@@ -14,7 +15,12 @@ export const THROW_V_LATERAL = -7;
 export const THROW_V_UP = 3.2;
 export const GRAVITY = 9.8;
 
-export const RIDER_HALF_WIDTH = 0.4;
+// The single shared rider width, RIDER_WIDTH_M (packages/game-core/src/
+// route.ts), was previously exported and unused while this file
+// independently hardcoded 0.4 as a half-width and Version B independently
+// hardcoded 0.8 as a full width in StreetScene.ts. Both now derive from
+// this one constant.
+export const RIDER_HALF_WIDTH = RIDER_WIDTH_M / 2;
 export const RIDER_HALF_LENGTH = 0.75;
 export const INVULNERABLE_S = 1.5;
 

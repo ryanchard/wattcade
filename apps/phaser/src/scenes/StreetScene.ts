@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import { DEFAULT_RIDER } from '@paperboy/trainer';
-import { hazardPositionAt, isHazardActive } from '@paperboy/game-core';
+import {
+  RIDER_WIDTH_M, hazardPositionAt, isHazardActive,
+} from '@paperboy/game-core';
 import type { HazardSpec, HouseSpec } from '@paperboy/game-core';
 import { PX_PER_M, project, toBodyX, toBodyY } from '../iso.js';
 import type { EntityRecord } from '../logic/entities.js';
@@ -62,9 +64,10 @@ export class StreetScene extends Phaser.Scene {
     // X is distance (along the road), Y is lateral (across it) — this must
     // match toBodyX/toBodyY's convention exactly, since Zone(x, y, width,
     // height) treats `width` as the X extent. The rider is 1.5 m long
-    // (distance) by 0.8 m wide (lateral), matching drawRiderView's box and
-    // Version A's RIDER_HALF_LENGTH/RIDER_HALF_WIDTH.
-    this.#riderZone = this.add.zone(0, 0, 1.5 * PX_PER_M, 0.8 * PX_PER_M);
+    // (distance) by RIDER_WIDTH_M wide (lateral) — the same shared width
+    // Version A's RIDER_HALF_LENGTH/RIDER_HALF_WIDTH derives from, instead
+    // of an independently hardcoded 0.8 — matching drawRiderView's box.
+    this.#riderZone = this.add.zone(0, 0, 1.5 * PX_PER_M, RIDER_WIDTH_M * PX_PER_M);
     this.physics.add.existing(this.#riderZone);
   }
 

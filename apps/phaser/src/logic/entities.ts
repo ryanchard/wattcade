@@ -92,6 +92,10 @@ export class BlockStreamer {
   }
 }
 
+// Mirrors apps/canvas/src/world.ts's surfaceCrr exactly (see its comment
+// for why these bands are duplicated rather than shared: the one shared
+// definition that looked like it should back this, game-core's
+// SurfaceSpec, was deleted as dead and incomplete rather than promoted).
 export function surfaceCrr(lateral: number): number {
   if (lateral < 3.0) return 0.02;
   if (lateral < 4.5) return 0.005;

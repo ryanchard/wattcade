@@ -119,6 +119,18 @@ export function ensureBlocks(w: WorldState): void {
   w.stacks = w.stacks.filter((s) => s.spec.distance > cutoff);
 }
 
+/**
+ * These band boundaries (3.0/4.5/5.5) are hand-duplicated in
+ * apps/phaser/src/logic/entities.ts's surfaceCrr and both apps' ground
+ * renderers. `packages/game-core/src/route.ts` used to generate a
+ * `SurfaceSpec[]` per block that looked like it should be the shared
+ * source of truth for these bands, but it was read by nothing (both apps
+ * always hardcoded the boundaries instead) and it only ever modelled two
+ * of the four bands here (grass and curb, missing sidewalk and road
+ * entirely) — promoting it would have meant rewriting it, not reusing it.
+ * It was deleted rather than kept as a stale, misleading abstraction; if
+ * these bands ever need to move, update all four call sites together.
+ */
 export function surfaceCrr(lateral: number): number {
   if (lateral < 3.0) return 0.02;    // lawn
   if (lateral < 4.5) return 0.005;   // sidewalk
