@@ -23,7 +23,6 @@ export function drawHud(
   s: Session,
   gapTrendMps: number,
   width: number,
-  trainerLabel: string,
 ): void {
   ctx.save();
   ctx.textBaseline = 'top';
@@ -31,7 +30,6 @@ export function drawHud(
   drawGap(ctx, s.gap, gapTrendMps, width);
   drawShakeProgress(ctx, s, width);
   drawDogCount(ctx, s.dogs, width);
-  drawSecondary(ctx, s, width, trainerLabel);
 
   ctx.restore();
 }
@@ -92,17 +90,4 @@ function drawDogCount(
   ctx.fillStyle = TEXT;
   ctx.font = `700 28px ${MONO}`;
   ctx.fillText(`${dogs} dog${dogs === 1 ? '' : 's'} on you`, 20, 20);
-}
-
-function drawSecondary(
-  ctx: CanvasRenderingContext2D, s: Session, width: number, trainerLabel: string,
-): void {
-  ctx.textAlign = 'right';
-  ctx.fillStyle = TEXT_DIM;
-  ctx.font = `500 16px ${MONO}`;
-  ctx.fillText(`${Math.round(s.powerCurrent)} W`, width - 20, 20);
-  ctx.fillText(`${(s.speed * 3.6).toFixed(1)} km/h`, width - 20, 40);
-  ctx.fillText(`${Math.round(s.distance)} m`, width - 20, 60);
-  ctx.fillText(`${Math.round(s.elapsed)} s`, width - 20, 80);
-  ctx.fillText(trainerLabel, width - 20, 100);
 }
