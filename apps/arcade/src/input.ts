@@ -13,6 +13,10 @@ export interface ShellKeys {
   stop: boolean;
   /** P went down: pause or resume. */
   pause: boolean;
+  /** `]` went down: one gear taller. */
+  shiftUp: boolean;
+  /** `[` went down: one gear smaller. */
+  shiftDown: boolean;
 }
 
 export interface ArcadeInput {
@@ -31,6 +35,8 @@ export function createInput(target: EventTarget): ArcadeInput {
   let pressed = new Set<string>();
   let stop = false;
   let pause = false;
+  let shiftUp = false;
+  let shiftDown = false;
   let capturing = false;
 
   const down = (e: Event): void => {
@@ -45,6 +51,11 @@ export function createInput(target: EventTarget): ArcadeInput {
     pressed.add(key);
     if (key === 'Escape') stop = true;
     if (key === 'p' || key === 'P') pause = true;
+    // The gear has a keyboard too, for a rider with no controller yet. It is
+    // a fallback and not the design: shifting wants a paddle under a finger
+    // that is already on the bars, which is what `gamepad.ts` is for.
+    if (key === ']') shiftUp = true;
+    if (key === '[') shiftDown = true;
   };
   const up = (e: Event): void => { held.delete((e as KeyboardEvent).key); };
   // A tab-away leaves keys stuck down forever otherwise, which for an arrow
@@ -58,12 +69,14 @@ export function createInput(target: EventTarget): ArcadeInput {
   return {
     read() {
       const frame = {
-        shell: { stop, pause },
+        shell: { stop, pause, shiftUp, shiftDown },
         game: { held: new Set(held), pressed } as GameKeys,
       };
       // Edge-triggered state is consumed by reading it.
       stop = false;
       pause = false;
+      shiftUp = false;
+      shiftDown = false;
       pressed = new Set<string>();
       return frame;
     },
@@ -73,5 +86,21 @@ export function createInput(target: EventTarget): ArcadeInput {
       target.removeEventListener('keyup', up);
       target.removeEventListener('blur', blur);
     },
+  };
+}
+
+/**
+ * The keyboard and the controller, said as one thing.
+ *
+ * A game is handed a single `GameKeys` and cannot tell which hand produced
+ * it, which is the whole reason the pad speaks in key names: nothing in a
+ * game had to learn what a controller is.
+ */
+export function mergeKeys(a: GameKeys, b: GameKeys): GameKeys {
+  if (b.held.size === 0 && b.pressed.size === 0) return a;
+  if (a.held.size === 0 && a.pressed.size === 0) return b;
+  return {
+    held: new Set([...a.held, ...b.held]),
+    pressed: new Set([...a.pressed, ...b.pressed]),
   };
 }
