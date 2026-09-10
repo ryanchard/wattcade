@@ -14,10 +14,14 @@ import type {
   TrainerSample, TrainerSource, TrainerStatus, Unsubscribe,
 } from '@paperboy/trainer';
 import {
+  GEAR_MAX, GEAR_MIN, NEUTRAL_GEAR, applyGear, gearRatio,
+} from '../src/gearing.js';
+import { MAX_GRADE_PERCENT } from '@paperboy/trainer';
+import {
   FIXED_DT, FLAT_SIMULATION, MAX_FRAME_S, MAX_SUBSTEPS, NO_KEYS, POWER_TAU_S,
   advanceRide, clearRide, createRide, effectiveSimulation, finishRide,
-  isUnderLoad, releaseRide, setCadence, setHidden, setPaused, setPower, startRide,
-  stopRide, tickRide, togglePaused,
+  isGeared, isUnderLoad, releaseRide, setCadence, setGear, setHidden, setPaused,
+  setPower, shiftDown, shiftUp, startRide, stopRide, tickRide, togglePaused,
 } from '../src/ride.js';
 import type { FrameInput, Ride } from '../src/ride.js';
 
@@ -70,6 +74,8 @@ function moduleWith(controls: GameModule['controls']): GameModule {
 
 const SILENT = moduleWith([]);
 const KEYED = moduleWith([{ keys: 'space', action: 'do a thing' }]);
+/** A cadence game: its light load is the design, and the gear leaves it be. */
+const SINGLE_SPEED: GameModule = { ...moduleWith([]), singleSpeed: true };
 
 class CountingSource implements TrainerSource {
   readonly kind = 'replay' as const;
@@ -443,3 +449,127 @@ function storage(): Storage {
     setItem(k, v) { map.set(k, v); },
   };
 }
+
+// ---------------------------------------------------------------------------
+// The gear
+// ---------------------------------------------------------------------------
+
+/** A ride, riding, in a given gear. */
+function inGear(gear: number, game: GameModule = SILENT): Ride {
+  const ride = createRide();
+  startRide(ride, game, new FakeSession());
+  setGear(ride, gear);
+  return ride;
+}
+
+describe('gearing', () => {
+  it('sends exactly what the game asked for in neutral', () => {
+    expect(effectiveSimulation(inGear(NEUTRAL_GEAR))).toBe(STEEP);
+  });
+
+  it('starts a new ride in neutral', () => {
+    expect(createRide().gear).toBe(NEUTRAL_GEAR);
+  });
+
+  it('scales the load the game asked for when the rider shifts up', () => {
+    const sent = effectiveSimulation(inGear(9));
+    expect(sent.cw).toBeCloseTo(STEEP.cw * gearRatio(9), 10);
+    expect(sent.grade).toBeGreaterThan(STEEP.grade);
+    // Same decision as `applyGear`, made in one place.
+    expect(sent).toEqual(applyGear(STEEP, 9));
+  });
+
+  it('lightens it when the rider shifts down', () => {
+    const sent = effectiveSimulation(inGear(GEAR_MIN));
+    expect(sent.cw).toBeLessThan(STEEP.cw);
+  });
+
+  it('cannot breach the grade clamp in any gear, on any game', () => {
+    // STEEP is 6%, which is the steepest road any of these games builds. The
+    // top gear asks for more than the clamp allows and does not get it.
+    for (let gear = GEAR_MIN; gear <= GEAR_MAX; gear++) {
+      const sent = effectiveSimulation(inGear(gear));
+      expect(Math.abs(sent.grade), `gear ${gear}`)
+        .toBeLessThanOrEqual(MAX_GRADE_PERCENT);
+    }
+    expect(effectiveSimulation(inGear(GEAR_MAX)).grade).toBe(MAX_GRADE_PERCENT);
+  });
+
+  it('flattens on the safety stop whatever gear the rider is in', () => {
+    const ride = inGear(GEAR_MAX);
+    stopRide(ride);
+    expect(effectiveSimulation(ride)).toBe(FLAT_SIMULATION);
+  });
+
+  it('flattens for every other reason too, whatever gear the rider is in', () => {
+    for (const reason of [
+      (r: Ride) => { setPaused(r, true); },
+      (r: Ride) => { setHidden(r, true); },
+      (r: Ride) => { releaseRide(r); },
+      (r: Ride) => { clearRide(r); },
+    ]) {
+      const ride = inGear(GEAR_MAX);
+      reason(ride);
+      expect(effectiveSimulation(ride)).toBe(FLAT_SIMULATION);
+    }
+  });
+
+  it('writes flat, not a geared flat, on the first frame after the stop', () => {
+    const ride = inGear(GEAR_MAX);
+    const source = new CountingSource();
+    stopRide(ride);
+    tickRide(ride, source, frame(1 / 60));
+    expect(source.writes).toHaveLength(1);
+    expect(source.writes[0]).toBe(FLAT_SIMULATION);
+  });
+
+  it('still writes exactly once per frame in a tall gear', () => {
+    const ride = inGear(GEAR_MAX);
+    const source = new CountingSource();
+    for (let i = 0; i < 20; i++) tickRide(ride, source, frame(1 / 60));
+    expect(source.writes).toHaveLength(20);
+  });
+
+  it('leaves a single-speed game exactly as its author tuned it', () => {
+    for (let gear = GEAR_MIN; gear <= GEAR_MAX; gear++) {
+      expect(effectiveSimulation(inGear(gear, SINGLE_SPEED))).toBe(STEEP);
+    }
+  });
+
+  it('knows which games have gears and which do not', () => {
+    expect(isGeared(inGear(NEUTRAL_GEAR))).toBe(true);
+    expect(isGeared(inGear(NEUTRAL_GEAR, SINGLE_SPEED))).toBe(false);
+    // No game running is no gear either — the hub has nothing to gear.
+    expect(isGeared(createRide())).toBe(false);
+  });
+
+  it('shifts one gear at a time and stops at the ends', () => {
+    const ride = inGear(NEUTRAL_GEAR);
+    expect(shiftUp(ride)).toBe(NEUTRAL_GEAR + 1);
+    expect(ride.gear).toBe(NEUTRAL_GEAR + 1);
+    expect(shiftDown(ride)).toBe(NEUTRAL_GEAR);
+    for (let i = 0; i < 40; i++) shiftDown(ride);
+    expect(ride.gear).toBe(GEAR_MIN);
+    for (let i = 0; i < 40; i++) shiftUp(ride);
+    expect(ride.gear).toBe(GEAR_MAX);
+  });
+
+  it('keeps the gear across starting a game and going back to the hub', () => {
+    // A gear is a fact about the rider's legs, not about this run. Being
+    // dropped into neutral between games is the thing a single-speed rider is
+    // trying to escape.
+    const ride = inGear(10);
+    clearRide(ride);
+    expect(ride.gear).toBe(10);
+    startRide(ride, SILENT, new FakeSession());
+    expect(ride.gear).toBe(10);
+  });
+
+  it('refuses a gear that is not one', () => {
+    const ride = inGear(NEUTRAL_GEAR);
+    setGear(ride, 999);
+    expect(ride.gear).toBe(GEAR_MAX);
+    setGear(ride, Number.NaN);
+    expect(ride.gear).toBe(NEUTRAL_GEAR);
+  });
+});

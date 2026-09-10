@@ -16,12 +16,16 @@ import { BAND_HEIGHT, drawBand, drawPaused } from './band.js';
 import { CATALOG, gameById } from './catalog.js';
 import { renderHub, resultsCard } from './hub.js';
 import type { HubGame } from './hub.js';
-import { createInput } from './input.js';
+import { browserPads, createPadInput } from './gamepad.js';
+import type { PadFrame } from './gamepad.js';
+import { loadGear, saveGear } from './gearing.js';
+import { createInput, mergeKeys } from './input.js';
 import { paintPoster } from './poster.js';
 import { loadProfile, saveProfile, withEntries } from './profile.js';
 import {
-  FLAT_SIMULATION, clearRide, createRide, finishRide, releaseRide, setHidden,
-  setCadence, setPower, startRide, stopRide, tickRide, togglePaused,
+  FLAT_SIMULATION, clearRide, createRide, finishRide, isGeared, releaseRide,
+  setCadence, setGear, setHidden, setPower, shiftDown, shiftUp, startRide,
+  stopRide, tickRide, togglePaused,
 } from './ride.js';
 import {
   loadBoards, loadInitials, normaliseInitials, recordScore, renameEntry,
@@ -41,6 +45,14 @@ const store = window.localStorage;
 
 const ride = createRide();
 const input = createInput(window);
+/**
+ * The controller. Polled, not subscribed: the Gamepad API has no button
+ * events, so it is read once per frame from the same loop the keyboard is.
+ */
+const pads = createPadInput(browserPads(navigator));
+/** The last poll, kept so the hub can say what is attached without polling
+ * again from a render. */
+let pad: PadFrame = pads.read();
 
 let source: TrainerSource | null = null;
 let trainer: TrainerView = describeTrainer(null, null);
@@ -53,6 +65,9 @@ let cadence: CadenceWatch = createCadenceWatch();
 let introDone = false;
 
 let profile: RiderProfile = loadProfile(store);
+// The gear the rider last left it in. Restored before the first frame, so a
+// rider who found their gear yesterday is still in it today.
+setGear(ride, loadGear(store));
 let seedText = '';
 /** What to start again when the rider asks for "again". */
 let lastStart: { gameId: string; variantId: string | null; seed: number | null } | null = null;
@@ -140,6 +155,8 @@ function showHub(): void {
     scores: loadBoards(store),
     games: hubGames(),
     seed: seedText,
+    pad: { connected: pad.connected, name: pad.name, standard: pad.standard },
+    gear: ride.gear,
   });
   overlay.hidden = false;
   wireHub();
@@ -174,6 +191,13 @@ function wireHub(): void {
     document.getElementById(id)?.addEventListener('change', commitProfile);
   }
 
+  // Keystrokes typed into a box belong to the box. `[` is a perfectly good
+  // character in a route name, and a rider naming a route should not find
+  // that they have changed gear and had the page redrawn out from under them.
+  for (const box of Array.from(sheet.querySelectorAll('input'))) {
+    box.addEventListener('keydown', (e) => { e.stopPropagation(); });
+  }
+
   const seedInput = document.getElementById('seed') as HTMLInputElement | null;
   seedInput?.addEventListener('input', () => { seedText = seedInput.value; });
   document.getElementById('daily')?.addEventListener('click', () => {
@@ -200,6 +224,19 @@ function wireHub(): void {
       begin(game, button.dataset['variant'] ?? null, seedFor(game));
     });
   }
+}
+
+/**
+ * A shift. The gear is the shell's, so this is the only place it moves, and
+ * it is written straight through to storage — a rider who found their gear
+ * mid-race should not lose it because the tab closed before the hub redrew.
+ */
+function changeGear(up: boolean): void {
+  const gear = up ? shiftUp(ride) : shiftDown(ride);
+  saveGear(store, gear);
+  // On the hub the gear is a line of copy rather than a HUD readout, so it
+  // has to be redrawn to change. Only when the hub is the thing on screen.
+  if (ride.session === null && !overlay.hidden) showHub();
 }
 
 function seedFor(game: GameModule): number | null {
@@ -301,8 +338,17 @@ function wireInitials(gameId: string, at: number): void {
 function frame(now: number): void {
   const dtSeconds = (now - lastFrame) / 1000;
   lastFrame = now;
-  const { shell, game: keys } = input.read();
+  const { shell, game: typed } = input.read();
+  pad = pads.read();
+  // The pad speaks in key names, so a game is handed one set of keys and
+  // cannot tell which hand produced them.
+  const keys = mergeKeys(typed, pad.keys);
   const { width, height } = viewport();
+
+  // Shifting works on the hub as well as mid-ride: a rider setting up should
+  // be able to pick a gear before they clip in.
+  if (shell.shiftUp || pad.shiftUp) changeGear(true);
+  if (shell.shiftDown || pad.shiftDown) changeGear(false);
   // The band is the shell's; the game is rendered into what is left, so no
   // game ever has to know it is there.
   const stage = Math.max(1, height - BAND_HEIGHT);
@@ -310,8 +356,8 @@ function frame(now: number): void {
   if (ride.session !== null) {
     // Both of these only ever set state. Neither writes to the trainer —
     // `tickRide` below is the single write, and it reads that state.
-    if (shell.stop) stopRide(ride);
-    if (shell.pause) togglePaused(ride);
+    if (shell.stop || pad.stop) stopRide(ride);
+    if (shell.pause || pad.pause) togglePaused(ride);
   }
 
   tickRide(ride, source, { dtSeconds, keys, width, height: stage });
@@ -329,6 +375,9 @@ function frame(now: number): void {
       // The same cadence the session is handed, from the same field, so the
       // band can never disagree with the game it is sitting under.
       cadenceRpm: ride.cadenceRpm,
+      // Null for a single-speed game, which is the honest reading: there is
+      // no gear to see, not a gear sitting at zero.
+      gear: isGeared(ride) ? ride.gear : null,
       elapsedS: ride.elapsedS,
       lines: session.hud(),
     }, width, height);
@@ -373,6 +422,18 @@ document.addEventListener('visibilitychange', () => {
     lastFrame = performance.now();
   }
 });
+
+/**
+ * A controller arriving or leaving while the rider is looking at the hub.
+ * The frame loop notices either way — this is only so the hub's line changes
+ * the moment it happens rather than the next time something else redraws it.
+ */
+for (const event of ['gamepadconnected', 'gamepaddisconnected']) {
+  window.addEventListener(event, () => {
+    pad = pads.read();
+    if (ride.session === null && !overlay.hidden) showHub();
+  });
+}
 
 showHub();
 requestAnimationFrame(frame);

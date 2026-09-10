@@ -23,6 +23,7 @@ import {
 import type { ScoreBoards } from './scores.js';
 import { formatDuration, statsFor } from './stats.js';
 import type { ArcadeStats } from './stats.js';
+import { GEAR_MAX } from './gearing.js';
 import { cadenceWarning, resistanceWarning } from './trainerStatus.js';
 import type { CadenceState, TrainerView } from './trainerStatus.js';
 
@@ -37,6 +38,15 @@ export interface HubGame {
   readonly variants: readonly GameVariant[];
 }
 
+/** What the hub needs to know about the controller. A subset of `PadFrame`,
+ * so the hub cannot accidentally start reading buttons. */
+export interface PadView {
+  readonly connected: boolean;
+  readonly name: string | null;
+  /** False when the browser did not recognise the layout. */
+  readonly standard: boolean;
+}
+
 export interface HubModel {
   readonly trainer: TrainerView;
   /** Whether the trainer has been reporting cadence, once it is known. */
@@ -47,6 +57,42 @@ export interface HubModel {
   readonly games: readonly HubGame[];
   /** Whatever is currently typed in the seed box, preserved across redraws. */
   readonly seed: string;
+  /** The controller, if there is one. */
+  readonly pad: PadView;
+  /** The virtual gear the rider last left it in. */
+  readonly gear: number;
+}
+
+/**
+ * A pad's own name, tidied. Browsers report things like "Xbox 360 Controller
+ * (STANDARD GAMEPAD Vendor: 045e Product: 028e)", and the half in brackets is
+ * for a driver rather than for a rider.
+ */
+export function padName(id: string | null): string {
+  const trimmed = (id ?? '').replace(/\s*\(.*$/, '').trim();
+  if (trimmed === '') return 'Controller';
+  return trimmed.length > 40 ? `${trimmed.slice(0, 39)}…` : trimmed;
+}
+
+/**
+ * The gear and how to change it, said in one line — and it says what is
+ * actually true of the hardware attached, because "shift with the shoulder
+ * buttons" is a lie to a rider with no controller and a worse one to a rider
+ * whose controller the browser could not map.
+ */
+export function gearLine(model: HubModel): string {
+  const gear = `Gear ${model.gear} of ${GEAR_MAX}.`;
+  if (!model.pad.connected) {
+    return `No controller. ${gear} Shift with [ and ], or plug a controller `
+      + 'in and shift with the shoulder buttons.';
+  }
+  if (!model.pad.standard) {
+    return `${padName(model.pad.name)} connected, but its layout is not one `
+      + `this browser recognises — it can steer, and it cannot shift. ${gear} `
+      + 'Shift with [ and ].';
+  }
+  return `${padName(model.pad.name)} connected. Shoulder buttons shift, `
+    + `Start pauses, Select or B stops. ${gear}`;
 }
 
 /** How the rider controls a game, said as a sentence rather than a legend. */
@@ -137,16 +183,17 @@ export function gameCard(entry: HubGame, model: HubModel): string {
     </article>`;
 }
 
-export function trainerPanel(view: TrainerView): string {
+export function trainerPanel(view: HubModel): string {
   return `
-    <section class="panel trainer" data-mode="${view.mode}">
+    <section class="panel trainer" data-mode="${view.trainer.mode}">
       <p class="k">Trainer</p>
-      <p class="headline">${escapeHtml(view.headline)}</p>
-      <p class="detail">${escapeHtml(view.detail)}</p>
+      <p class="headline">${escapeHtml(view.trainer.headline)}</p>
+      <p class="detail">${escapeHtml(view.trainer.detail)}</p>
       <p class="actions">
         <button id="connect" class="go">Connect a trainer</button>
         <button id="keyboard" class="ghost">Ride from the keyboard</button>
       </p>
+      <p class="pad" data-pad="${view.pad.connected ? (view.pad.standard ? 'standard' : 'unmapped') : 'none'}">${escapeHtml(gearLine(view))}</p>
       <p class="fine">Chrome or Edge for a real trainer, and close Zwift and
         the Wahoo app first — a trainer pairs to one thing at a time. Connect
         once here and you can change games without getting off the bike.</p>
@@ -251,7 +298,7 @@ export function renderHub(model: HubModel): string {
       <div class="bulbs" aria-hidden="true"></div>
     </header>
     <div class="panels">
-      ${trainerPanel(model.trainer)}
+      ${trainerPanel(model)}
       ${riderPanel(model.profile)}
     </div>
     <section class="games" aria-label="Games">
@@ -259,7 +306,11 @@ export function renderHub(model: HubModel): string {
     </section>
     ${scoresSection(model)}
     <p class="fine footer">Esc stops a ride and relaxes the trainer. P pauses
-      it. Both work in every game, and both leave the trainer flat.</p>`;
+      it. Both work in every game, and both leave the trainer flat. [ and ]
+      change gear, as do a controller’s shoulder buttons — the gear multiplies
+      whatever load the game asks for, so a rider with one sprocket can still
+      find a resistance their legs agree with. Spin Cycle and Fish are
+      single-speed: cadence steers them, and steering must stay cheap.</p>`;
 }
 
 export interface ResultsModel {

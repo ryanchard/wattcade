@@ -8,7 +8,7 @@
  * rather than as a zero, and that the three right-hand figures never overlap.
  */
 import { describe, expect, it } from 'vitest';
-import { BAND_HEIGHT, drawBand, formatCadence } from '../src/band.js';
+import { BAND_HEIGHT, drawBand, formatCadence, formatGear } from '../src/band.js';
 import type { BandModel } from '../src/band.js';
 import type { TrainerView } from '../src/trainerStatus.js';
 
@@ -79,6 +79,7 @@ function model(over: Partial<BandModel> = {}): BandModel {
     trainer: TRAINER,
     watts: 212,
     cadenceRpm: 88,
+    gear: 4,
     elapsedS: 65,
     lines: [],
     ...over,
@@ -110,6 +111,17 @@ describe('formatCadence', () => {
   it('shows a dash for no reading, never a zero', () => {
     expect(formatCadence(null)).toBe('—');
     expect(formatCadence(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatGear', () => {
+  it('says the gear as a whole number', () => {
+    expect(formatGear(7)).toBe('7');
+  });
+
+  it('shows a dash for a game with no gears', () => {
+    expect(formatGear(null)).toBe('—');
+    expect(formatGear(Number.NaN)).toBe('—');
   });
 });
 
@@ -145,11 +157,11 @@ describe('drawBand', () => {
     expect(present.fill).toBe(find(draw({ cadenceRpm: 88 }), 'W').fill);
   });
 
-  it('keeps the three right-hand figures clear of one another', () => {
+  it('keeps the right-hand figures clear of one another', () => {
     // Right-aligned, so each figure occupies [x - width, x]. A four-digit
     // wattage is the case that would collide if the layout were fixed-offset.
-    const r = draw({ watts: 1240, cadenceRpm: 120, elapsedS: 3599 });
-    const right = ['rpm', 'W', ':'].map((n) => find(r, n));
+    const r = draw({ watts: 1240, cadenceRpm: 120, gear: 12, elapsedS: 3599 });
+    const right = ['gear', 'rpm', 'W', ':'].map((n) => find(r, n));
     for (const a of right) {
       for (const b of right) {
         if (a === b) continue;
@@ -157,6 +169,26 @@ describe('drawBand', () => {
         expect(overlap, `"${a.text}" overlaps "${b.text}"`).toBe(false);
       }
     }
+  });
+
+  it('draws the gear next to the watts it changes', () => {
+    const r = draw({ gear: 9 });
+    expect(find(r, 'gear').text).toBe('gear 9');
+    expect(find(r, 'gear').font).toBe(find(r, 'W').font);
+  });
+
+  it('shows a dash for a game that has no gears', () => {
+    // Spin Cycle and Fish are single-speed on purpose. A zero would invite a
+    // rider to try to move something that does not move.
+    const r = draw({ gear: null });
+    expect(find(r, 'gear').text).toBe('gear —');
+  });
+
+  it('dims the gear on a single-speed game and lights it on a geared one', () => {
+    const absent = find(draw({ gear: null }), 'gear');
+    const present = find(draw({ gear: 6 }), 'gear');
+    expect(absent.fill).not.toBe(present.fill);
+    expect(present.fill).toBe(find(draw({ gear: 6 }), 'W').fill);
   });
 
   it('leaves the context balanced', () => {

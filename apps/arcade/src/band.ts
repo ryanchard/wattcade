@@ -35,6 +35,12 @@ export interface BandModel {
   readonly watts: number;
   /** Cadence as the trainer last reported it, or null when it reports none. */
   readonly cadenceRpm: number | null;
+  /**
+   * The virtual gear the shell is applying, or null when this game is
+   * single-speed and the gear is doing nothing. Shown next to the watts it
+   * changes, because a rider who just shifted needs to see what they changed.
+   */
+  readonly gear: number | null;
   readonly elapsedS: number;
   readonly lines: readonly HudLine[];
 }
@@ -49,6 +55,17 @@ export interface BandModel {
 export function formatCadence(rpm: number | null): string {
   if (rpm === null || !Number.isFinite(rpm)) return '—';
   return String(Math.round(rpm));
+}
+
+/**
+ * The gear for the band. Null gets an em dash, the same as an absent cadence
+ * and for the same reason: a single-speed game is not in gear 0, it is a game
+ * that does not have gears, and a number would invite a rider to try to move
+ * it.
+ */
+export function formatGear(gear: number | null): string {
+  if (gear === null || !Number.isFinite(gear)) return '—';
+  return String(Math.round(gear));
 }
 
 function clock(seconds: number): string {
@@ -91,7 +108,13 @@ export function drawBand(
   // Dimmed when there is no reading, so "no cadence sensor" looks like the
   // absence it is rather than a number the rider should be trying to move.
   ctx.fillStyle = model.cadenceRpm === null ? DIM : TEXT;
-  ctx.fillText(`${formatCadence(model.cadenceRpm)} rpm`, cursor, mid);
+  const cadenceText = `${formatCadence(model.cadenceRpm)} rpm`;
+  ctx.fillText(cadenceText, cursor, mid);
+  cursor -= ctx.measureText(cadenceText).width + 22;
+  // Dimmed for a single-speed game, so "this game has no gears" looks like
+  // the absence it is rather than a control the rider is failing to find.
+  ctx.fillStyle = model.gear === null ? DIM : TEXT;
+  ctx.fillText(`gear ${formatGear(model.gear)}`, cursor, mid);
 
   // Middle: whatever this game asked the shell to show.
   if (model.lines.length > 0) {

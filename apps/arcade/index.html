@@ -188,6 +188,19 @@
         letter-spacing: 0.01em;
       }
       .trainer .detail { margin: 0.5rem 0 0; color: var(--ink-soft); }
+      /* The controller and the gear: a second piece of hardware, said in the
+         same panel as the first, and marked the same way — an ink block for a
+         state a rider can act on. */
+      .trainer .pad {
+        margin: 0.875rem 0 0;
+        padding-left: 0.75rem;
+        border-left: 4px solid var(--ink-faint);
+        font-size: 0.8125rem;
+        line-height: 1.6;
+        color: var(--ink-soft);
+      }
+      .trainer .pad[data-pad="standard"] { border-left-color: var(--teal); }
+      .trainer .pad[data-pad="unmapped"] { border-left-color: var(--amber); }
       .trainer .actions {
         margin: 1.125rem 0 0;
         display: flex; gap: 0.625rem; flex-wrap: wrap;

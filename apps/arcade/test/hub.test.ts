@@ -9,7 +9,8 @@ import { DEFAULT_RIDER } from '@paperboy/trainer';
 import type { TrainerStatus } from '@paperboy/trainer';
 import type { GameModule } from '@paperboy/game-api';
 import { CATALOG } from '../src/catalog.js';
-import { controlsLine, escapeHtml, renderHub } from '../src/hub.js';
+import { GEAR_MAX, NEUTRAL_GEAR } from '../src/gearing.js';
+import { controlsLine, escapeHtml, gearLine, padName, renderHub } from '../src/hub.js';
 import type { HubModel } from '../src/hub.js';
 import {
   cadenceState, cadenceWarning, createCadenceWatch, describeTrainer,
@@ -31,6 +32,8 @@ function model(over: Partial<HubModel> = {}): HubModel {
       game, variants: game.variants?.(createMemoryStorage()) ?? [],
     })),
     seed: '',
+    pad: { connected: false, name: null, standard: false },
+    gear: NEUTRAL_GEAR,
     ...over,
   };
 }
@@ -227,5 +230,83 @@ describe('controlsLine', () => {
     for (const id of ['pack', 'velodrome']) {
       expect(CATALOG.find((g) => g.id === id)?.controls).toEqual([]);
     }
+  });
+});
+
+describe('padName', () => {
+  it('drops the half of a pad id that is meant for a driver', () => {
+    expect(padName('Xbox 360 Controller (STANDARD GAMEPAD Vendor: 045e)'))
+      .toBe('Xbox 360 Controller');
+  });
+
+  it('names an unnamed pad rather than showing a gap', () => {
+    expect(padName(null)).toBe('Controller');
+    expect(padName('')).toBe('Controller');
+    expect(padName('   ')).toBe('Controller');
+  });
+
+  it('trims a name too long for the panel', () => {
+    expect(padName('x'.repeat(90)).length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe('gearLine', () => {
+  it('says the gear, and how many there are', () => {
+    const line = gearLine(model({ gear: 7 }));
+    expect(line).toContain('Gear 7');
+    expect(line).toContain(String(GEAR_MAX));
+  });
+
+  it('offers the keyboard when there is no controller', () => {
+    const line = gearLine(model());
+    expect(line).toContain('No controller');
+    expect(line).toContain('[ and ]');
+  });
+
+  it('says where the paddles are once a controller is attached', () => {
+    const line = gearLine(model({
+      pad: { connected: true, name: '8BitDo Zero 2', standard: true },
+    }));
+    expect(line).toContain('8BitDo Zero 2');
+    expect(line).toContain('Shoulder buttons shift');
+  });
+
+  it('is honest about a controller whose layout is not recognised', () => {
+    // Promising shift paddles that the shell has refused to guess at would be
+    // a rider pulling a trigger and wondering why nothing happens.
+    const line = gearLine(model({
+      pad: { connected: true, name: 'Strange Device', standard: false },
+    }));
+    expect(line).toContain('Strange Device');
+    expect(line).toContain('cannot shift');
+    expect(line).not.toContain('Shoulder buttons shift');
+  });
+});
+
+describe('the hub’s controller line', () => {
+  it('marks the state so it can be inked like the trainer’s', () => {
+    expect(renderHub(model())).toContain('data-pad="none"');
+    expect(renderHub(model({
+      pad: { connected: true, name: 'A Pad', standard: true },
+    }))).toContain('data-pad="standard"');
+    expect(renderHub(model({
+      pad: { connected: true, name: 'A Pad', standard: false },
+    }))).toContain('data-pad="unmapped"');
+  });
+
+  it('shows the gear the rider left it in', () => {
+    expect(renderHub(model({ gear: 11 }))).toContain('Gear 11');
+  });
+
+  it('says which games have no gears, once, in the footer', () => {
+    const html = renderHub(model());
+    expect(html).toContain('single-speed');
+  });
+
+  it('escapes a pad name the way it escapes everything else', () => {
+    const html = renderHub(model({
+      pad: { connected: true, name: '<script>bad</script>', standard: true },
+    }));
+    expect(html).not.toContain('<script>bad');
   });
 });

@@ -16,6 +16,10 @@
  */
 import type { GameKeys, GameModule, GameSession, RunResult } from '@paperboy/game-api';
 import type { SimulationParams, TrainerSource } from '@paperboy/trainer';
+import {
+  NEUTRAL_GEAR, applyGear, clampGear, shiftDown as gearDown,
+  shiftUp as gearUp,
+} from './gearing.js';
 
 /**
  * Trainers notify at 1-4 Hz. Easing rather than stepping keeps the rider from
@@ -80,6 +84,12 @@ export interface Ride {
   /** True once this run's ending has been dealt with, so it is dealt with
    * once: records written once, results card built once. */
   ended: boolean;
+  /**
+   * The virtual gear, applied to whatever the game asks for on its way to the
+   * trainer. Owned here rather than by a game for the same reason every write
+   * is: one place decides what the trainer is told. See `gearing.ts`.
+   */
+  gear: number;
 }
 
 export interface FrameInput {
@@ -106,6 +116,7 @@ export function createRide(): Ride {
     accumulator: 0,
     elapsedS: 0,
     ended: false,
+    gear: NEUTRAL_GEAR,
   };
 }
 
@@ -151,6 +162,38 @@ export function setCadence(r: Ride, rpm: number | null): void {
     return;
   }
   r.cadenceRpm = rpm;
+}
+
+/**
+ * The gear the rider is in. Deliberately survives `startRide` and
+ * `clearRide`: a gear is a fact about this rider's legs, not about this run,
+ * and being dropped back into neutral between games is exactly the thing a
+ * single-speed rider is trying to escape.
+ */
+export function setGear(r: Ride, gear: number): void {
+  r.gear = clampGear(gear);
+}
+
+/** One gear taller. Returns the gear now in use, so the caller can persist
+ * it without having to know how the clamping went. */
+export function shiftUp(r: Ride): number {
+  r.gear = gearUp(r.gear);
+  return r.gear;
+}
+
+/** One gear smaller. */
+export function shiftDown(r: Ride): number {
+  r.gear = gearDown(r.gear);
+  return r.gear;
+}
+
+/**
+ * Whether the gear applies to what is on screen. A single-speed game gets the
+ * load its author tuned and nothing else — and the hub and the band both read
+ * this, so the rider is never shown a gear that is not doing anything.
+ */
+export function isGeared(r: Ride): boolean {
+  return r.game !== null && r.game.singleSpeed !== true;
 }
 
 export function setPaused(r: Ride, paused: boolean): void {
@@ -207,9 +250,17 @@ export function isUnderLoad(r: Ride): boolean {
 /**
  * The single simulation value to send this frame. The game says what it
  * wants; this decides what it gets.
+ *
+ * The gear is applied here and only here, INSIDE the under-load test, so
+ * there is no path by which a gear can survive a pause, a hidden tab or the
+ * safety stop: every one of those returns the flat value untouched, whatever
+ * the rider last shifted to. `applyGear` clamps the grade it produces, so the
+ * ±8% limit is not reachable through gearing either.
  */
 export function effectiveSimulation(r: Ride): SimulationParams {
-  return isUnderLoad(r) ? r.session!.simulation() : FLAT_SIMULATION;
+  if (!isUnderLoad(r)) return FLAT_SIMULATION;
+  const wanted = r.session!.simulation();
+  return isGeared(r) ? applyGear(wanted, r.gear) : wanted;
 }
 
 /**
