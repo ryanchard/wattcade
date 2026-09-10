@@ -74,6 +74,33 @@ It needs a W′ value on the rider profile (seedable from FTP and sprint power),
 depletion above threshold, recovery below, and a HUD readout. Then a
 ride-and-tune loop, because the numbers only mean something once felt.
 
+### The rivals need a battery too, not just the player
+
+Verified in the code, and it is worse than "the player's sprint is free".
+
+Drafting *is* modelled symmetrically — a rival on your wheel gets exactly the
+shelter you would, and the source says so: "model it symmetrically or the
+tactics are dishonest". But neither side has anything that depletes. Both
+riders' kilojoules are tracked and then read exactly once, at the end, to
+compute average power for the results card. Nothing feeds back into
+behaviour.
+
+So a rival cannot be worn down. Drag one round the track at 400 W for four
+laps and it finishes as fresh as one that sat in the whole way. The saving a
+rival banks by drafting is a speed bonus in the moment, not a stored
+resource, because there is no store.
+
+**This makes one of the six counters fiction.** Ryan the Wheelsucker is
+described as beatable by "force the pace, or play chicken and jump before they
+do". The first half cannot work — there is no mechanism by which forcing the
+pace costs them anything. Only the timing half functions, and the game is
+advertising a tactic it does not implement.
+
+Forcing the pace, wearing someone down, making them chase, sitting in to save
+yourself: none of that vocabulary means anything until BOTH sides have a
+finite battery. W' is therefore not just a difficulty fix for the player — it
+is what makes the rivals' stated counters true.
+
 **Difficulty levels are the cheaper alternative** and worth having anyway —
 scaling rival power and aggression by a chosen tier. But they treat the
 symptom. A harder Diesel is still beaten by the same one kick.
