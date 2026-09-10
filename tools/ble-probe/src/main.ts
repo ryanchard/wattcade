@@ -17,6 +17,63 @@ function log(msg: string): void {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+/**
+ * The grade sweep runs with a rider on a real trainer, so it must be
+ * abortable at every instant, not only between its 6-second steps. This
+ * flags the abort AND wakes up whichever `wait()` call is currently
+ * blocking the loop — that is what makes the abort take effect DURING a
+ * step, rather than only being noticed once the current step's timer
+ * happens to elapse on its own.
+ */
+class SweepAbort {
+  #aborted = false;
+  #wake: (() => void) | null = null;
+
+  get aborted(): boolean {
+    return this.#aborted;
+  }
+
+  abort(): void {
+    if (this.#aborted) return;
+    this.#aborted = true;
+    this.#wake?.();
+    this.#wake = null;
+  }
+
+  /** Resolves after `ms`, or immediately if abort() is called first. */
+  wait(ms: number): Promise<void> {
+    if (this.#aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.#wake = null;
+        resolve();
+      }, ms);
+      this.#wake = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+  }
+}
+
+let activeSweep: SweepAbort | null = null;
+
+function setSweepButtons(running: boolean): void {
+  ($('sweep') as HTMLButtonElement).disabled = running || writer === null;
+  ($('stop') as HTMLButtonElement).disabled = !running;
+}
+
+/** Escape and the Stop button both funnel through here. */
+function stopSweep(): void {
+  if (activeSweep === null || activeSweep.aborted) return;
+  log('Stop requested — aborting sweep immediately.');
+  activeSweep.abort();
+}
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') stopSweep();
+});
+
 const hex = (v: DataView) =>
   Array.from(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -63,7 +120,7 @@ $('connect').addEventListener('click', async () => {
       log(`Request Control -> ${granted ? 'GRANTED' : 'REFUSED'}`);
       if (granted) {
         log(`Start/Resume -> ${await writer.startOrResume()}`);
-        ($('sweep') as HTMLButtonElement).disabled = false;
+        setSweepButtons(false);
       }
     } else {
       log('Grade sweep unavailable: trainer exposes no control point. Questions 1, 2, and 5 can still be answered.');
@@ -75,20 +132,34 @@ $('connect').addEventListener('click', async () => {
 });
 
 $('sweep').addEventListener('click', async () => {
+  if (writer === null || activeSweep !== null) return;
+  const abort = new SweepAbort();
+  activeSweep = abort;
+  setSweepButtons(true);
   try {
-    if (writer === null) return;
-    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     for (const grade of [0, 2, 4, 6, 3, 0, -3, 0]) {
+      if (abort.aborted) break;
       log(`grade -> ${grade}%  (pedal and report what you feel)`);
       writer.setSimulation({ grade, headwind: 0, crr: 0.004, cw: 0.51 });
-      await wait(6000);
+      await abort.wait(6000);
     }
     await writer.resetResistance();
-    log('Sweep complete, resistance reset to 0%.');
+    log(
+      abort.aborted
+        ? 'Sweep ABORTED — resistance reset to 0%.'
+        : 'Sweep complete, resistance reset to 0%.',
+    );
   } catch (err) {
     log(`ERROR ${err instanceof Error ? err.message : String(err)}`);
+    await writer.resetResistance();
+    log('Resistance reset to 0% after error.');
+  } finally {
+    activeSweep = null;
+    setSweepButtons(false);
   }
 });
+
+$('stop').addEventListener('click', stopSweep);
 
 $('download').addEventListener('click', () => {
   const capture = {
@@ -107,6 +178,12 @@ $('download').addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-window.addEventListener('beforeunload', () => {
+function panicReset(): void {
+  activeSweep?.abort();
   void writer?.resetResistance();
-});
+}
+window.addEventListener('beforeunload', panicReset);
+// beforeunload does not fire reliably on mobile/bfcache navigations —
+// pagehide is the belt to its suspenders, same rider-safety reasoning as
+// the Stop button above.
+window.addEventListener('pagehide', panicReset);

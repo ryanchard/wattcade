@@ -9,6 +9,11 @@
       #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 1rem;
              height: 24rem; overflow: auto; margin-top: 1rem; }
       .live { display: flex; gap: 2rem; margin-top: 1rem; font-size: 1.5rem; }
+      .dim { color: #777; font-size: .9em; }
+      #stop:not(:disabled) {
+        background: #b00020; color: #fff; border: 1px solid #7a0016;
+        font-weight: bold;
+      }
     </style>
   </head>
   <body>
@@ -16,7 +21,9 @@
     <p>Close Zwift and the Wahoo app first — a trainer pairs to one client at a time.</p>
     <button id="connect">Connect</button>
     <button id="sweep" disabled>Run grade sweep</button>
+    <button id="stop" disabled>Stop sweep</button>
     <button id="download" disabled>Download capture</button>
+    <p class="dim">Escape also stops the sweep immediately and resets resistance.</p>
     <div class="live">
       <div>Power <b id="power">—</b> W</div>
       <div>Cadence <b id="cadence">—</b> rpm</div>
