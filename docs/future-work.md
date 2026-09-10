@@ -5,45 +5,81 @@ observed, why it matters, and what it would take. Nothing here is scheduled.
 
 ---
 
-## 1. Virtual shifting, and controller support
+## 1. Virtual shifting, and controller support — SHIPPED
 
-These arrived as two separate notes and are really one feature.
+Kept here rather than deleted, because the numbers are the interesting part
+and the next person to touch the mapping will want them.
 
 **Observed:** "I can't get watts up without more resistance."
 
-**Why it happens.** In FTMS simulation mode the trainer computes its own load
+**Why it happened.** In FTMS simulation mode the trainer computes its own load
 from the parameters we send — grade, wind speed, rolling resistance, wind
 coefficient — combined with *its* measurement of wheel speed. On a flat track
 at grade 0 there is very little to push against, so producing a big number
-means spinning absurdly fast rather than pressing hard. The games make this
-worse deliberately: the cadence games send `cw 0.28` precisely so that
-spinning is cheap, which is right for steering and wrong for effort.
+meant spinning absurdly fast rather than pressing hard. The cadence games made
+it worse deliberately: they send `cw 0.28` precisely so that spinning is
+cheap, which is right for steering and wrong for effort. A rider with real
+gears works around this by shifting up; a rider on a Zwift Cog or a fixed
+sprocket cannot.
 
-A rider with real gears can work around this by shifting up. A rider on a
-single-speed setup — a Zwift Cog, a fixed sprocket, a direct-drive with one
-gear — cannot, and is stuck at whatever load the game asks for.
+**What shipped.** A twelve-speed block owned by the shell (`apps/arcade/src/
+gearing.ts`), applied in `effectiveSimulation` to whatever a game's
+`simulation()` returns. Neutral is gear 4 and is the identity — the same
+object, not merely an equal one — so a rider who never shifts gets exactly
+what each game's author tuned. Each gear is 18% taller than the one below,
+which is about one sprocket.
 
-**The fix is a virtual gear.** Keep a gear ratio in software, multiply the load
-we request by it, and let the rider change it mid-ride. The rider then finds a
-gear where their comfortable cadence produces the power they want, exactly as
-they would on the road. This is what Zwift's Click and Play hardware does.
+Two levers, because one is not enough:
 
-**And this is why the controller note belongs here.** Shifting needs two
-inputs, and the whole design rule of these games is that hands are busy and
-effort is hard — so keyboard shifting is no good. A cheap Bluetooth gamepad
-bungeed to the bars gives shift paddles exactly where a rider expects them.
-The Gamepad API is straightforward and the arcade shell already owns input, so
-it is one implementation for every game.
+- `cw` is multiplied by the ratio. This is the honest one — it is what a
+  taller gear does on the road — but drag goes as v², so at the speeds
+  Paperboy runs at it is worth little and at a standstill nothing.
+- a small grade contribution, `1.3 × (ratio − 1)` percent, which is
+  speed-independent and bites the moment the cranks turn. One-sided on
+  purpose: a tall gear tilts the road up, a low gear only thins the air. The
+  game chose its road, and gearing may make it harder to turn the pedals
+  without turning one of Paperboy's climbs into a descent.
 
-**Effort:** moderate. The gear multiplier is small — a value in the shell,
-applied to whatever `simulation()` a game requests, before `clampGrade`. The
-gamepad layer is a self-contained addition to the shell. The fiddly part is
-deciding what a "gear" means for each game: on the velodrome it should feel
-like a real gear, while in Fish it probably should not exist at all.
+`crr` is untouched. It is the surface the game picked — Paperboy's lawns
+against its tarmac, The Pack's dogs — and a gear that turned grass into road
+would be changing the game rather than the load.
 
-**Careful with:** the ±8% clamp stays absolute. A gear multiplier must never be
-able to push past it, and the panic key must still flatten the trainer
-regardless of gear.
+What that is worth, as watts requested at a fixed wheel speed from a flat
+`grade 0, crr 0.005, cw 0.51` for an 85 kg rider:
+
+| gear | ratio | +grade |  4 m/s |  8 m/s | 15 m/s |
+| ---: | ----: | -----: | -----: | -----: | -----: |
+|    1 |  0.61 |   0.0% |   27 W |  113 W |  586 W |
+|    4 |  1.00 |   0.0% |   33 W |  164 W |  923 W |
+|    8 |  1.94 |   1.2% |   89 W |  368 W | 1884 W |
+|   12 |  3.76 |   3.6% |  198 W |  763 W | 3746 W |
+
+Top gear is ~6× neutral at 4 m/s and ~4× at 15. Scaling `cw` alone would have
+been 2.4× and 3.6×, and at 2 m/s barely 1.5× — which is the whole argument for
+the grade term, and there is a test asserting the split.
+
+**The clamp is still the last word.** `applyGear` runs its grade through
+`clampGrade` and `encodeSimulationParams` clamps again. Paperboy's steepest 6%
+plus the top gear saturates at 8% and stays there. The gear is applied inside
+the under-load test, so pause, a hidden tab, the page unloading and the safety
+stop all still return the frozen flat value whatever gear the rider is in.
+
+**Spin Cycle and Fish opted out** through `GameModule.singleSpeed`. Cadence is
+the steering wheel in both, and a gear that made spinning expensive would make
+steering cost a sprint — the exact trade both were built to avoid.
+
+**Controller support** came with it (`apps/arcade/src/gamepad.ts`): polled once
+a frame from the shell's own loop, translated into the same key names the
+keyboard produces, so no game had to learn what a gamepad is. Shoulders and
+triggers shift, the d-pad or left stick steers, South or West throws, Start
+pauses, Select or East stops. A pad the browser could not map gets the first
+axis and the first button and nothing else, because an index means nothing on
+an unknown layout.
+
+**Still to confirm on hardware.** Nobody has ridden it. Whether 18% a gear is
+the right step, whether neutral at 4 leaves enough low range, and whether the
+shoulder buttons are where a rider's fingers actually land with a pad bungeed
+to the bars — all of that wants a ride and a controller.
 
 ---
 
