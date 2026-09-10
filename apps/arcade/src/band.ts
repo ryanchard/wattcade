@@ -35,7 +35,6 @@ export interface BandModel {
   readonly watts: number;
   readonly elapsedS: number;
   readonly lines: readonly HudLine[];
-  readonly paused: boolean;
 }
 
 function clock(seconds: number): string {

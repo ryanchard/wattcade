@@ -10,7 +10,7 @@ import { dailySeed, randomSeed, seedFromString } from '@paperboy/game-core';
 import {
   FtmsSource, KeyboardSource, createWebBluetoothConnector,
 } from '@paperboy/trainer';
-import type { RiderProfile, TrainerSource, TrainerStatus } from '@paperboy/trainer';
+import type { RiderProfile, TrainerSource } from '@paperboy/trainer';
 import type { GameModule, GameVariant, RunResult } from '@paperboy/game-api';
 import { BAND_HEIGHT, drawBand, drawPaused } from './band.js';
 import { CATALOG, gameById } from './catalog.js';
@@ -36,8 +36,6 @@ const ride = createRide();
 const input = createInput(window);
 
 let source: TrainerSource | null = null;
-let sourceKind: TrainerSource['kind'] | null = null;
-let status: TrainerStatus | null = null;
 let trainer: TrainerView = describeTrainer(null, null);
 
 let profile: RiderProfile = loadProfile(store);
@@ -75,14 +73,12 @@ resize();
 async function useSource(next: TrainerSource): Promise<void> {
   const previous = source;
   source = next;
-  sourceKind = next.kind;
   if (previous !== null) {
     previous.setSimulation(FLAT_SIMULATION);
     await previous.stop();
   }
 
   next.onStatus((s) => {
-    status = s;
     trainer = describeTrainer(next.kind, s);
     // A dropped link must not leave the rider coasting forever on the last
     // reading — decay it toward zero the way stopping pedalling would.
@@ -192,8 +188,6 @@ function showResults(game: GameModule, result: RunResult): void {
     result,
     nextId,
     nextName: nextId === null ? null : variantName(game, nextId),
-    variantId: lastStart?.variantId ?? null,
-    seed: seedText,
   });
   overlay.hidden = false;
   input.setCapturing(false);
@@ -245,7 +239,6 @@ function frame(now: number): void {
       watts: ride.powerCurrent,
       elapsedS: ride.elapsedS,
       lines: session.hud(),
-      paused: ride.paused,
     }, width, height);
 
     const result = finishRide(ride, store);

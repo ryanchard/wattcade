@@ -193,9 +193,6 @@ export interface ResultsModel {
   /** Name of the variant to offer next, when this run unlocked one. */
   readonly nextName: string | null;
   readonly nextId: string | null;
-  /** The variant just ridden, so "again" means the same one. */
-  readonly variantId: string | null;
-  readonly seed: string;
 }
 
 export function resultsCard(model: ResultsModel): string {
