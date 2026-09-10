@@ -1,5 +1,12 @@
 # The bake-off: Canvas versus Phaser
 
+> **Written before the arcade restructure.** Version A has since moved from
+> `apps/canvas` to `packages/game-paperboy` and is played through
+> `apps/arcade` on port 5185; it no longer has an app or a dev server of its
+> own. Version B is untouched at `apps/phaser`. Every path and port below is
+> as it was at the time of the comparison, and is left that way because this
+> is a record of what was measured, not a guide to the tree as it now is.
+
 The same Paperboy-on-a-bike-trainer game got built twice: once by hand on
 Canvas 2D (`apps/canvas`, Version A), once on Phaser 3 (`apps/phaser`,
 Version B). Both sit on the same two packages — `@paperboy/game-core` (route

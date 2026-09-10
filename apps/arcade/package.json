@@ -1,0 +1,14 @@
+{
+  "name": "@paperboy/arcade",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "dependencies": {
+    "@paperboy/game-api": "*",
+    "@paperboy/game-core": "*",
+    "@paperboy/game-pack": "*",
+    "@paperboy/game-paperboy": "*",
+    "@paperboy/game-velodrome": "*",
+    "@paperboy/trainer": "*"
+  }
+}
