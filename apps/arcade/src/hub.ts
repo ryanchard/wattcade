@@ -173,7 +173,7 @@ export function renderHub(model: HubModel): string {
 
   return `
     <header class="masthead">
-      <h1>Arcade</h1>
+      <h1>Wattcade</h1>
       <p class="ridden">${escapeHtml(ridden)}</p>
     </header>
     <div class="panels">
@@ -218,7 +218,7 @@ export function resultsCard(model: ResultsModel): string {
         ${model.nextName === null ? '' : `
           <button id="next" class="go"
             data-variant="${escapeHtml(model.nextId ?? '')}">Next: ${escapeHtml(model.nextName)}</button>`}
-        <button id="hub" class="ghost">Back to the arcade</button>
+        <button id="hub" class="ghost">Back to Wattcade</button>
       </p>
     </section>`;
 }
