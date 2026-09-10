@@ -17,9 +17,22 @@ export interface ControlPointWriterOptions {
   simIntervalMs?: number;
 }
 
+/**
+ * `sim` marks a Set Simulation Parameters command (an ordinary grade write
+ * OR a reset-to-flat write — both encode the same opcode, only the values
+ * differ). `#enqueue` uses this tag to find and drop a stale queued sim
+ * entry before adding a new one: a simulation write is inherently
+ * last-value-wins, so only the newest one queued (not yet in flight) is
+ * ever worth sending. Every other command (request control, start/resume,
+ * stop/pause) queues normally, since those are not fungible with each
+ * other.
+ */
+type QueueKind = 'sim' | 'other';
+
 interface QueueEntry {
   bytes: Uint8Array;
   resolve: (ok: boolean) => void;
+  kind: QueueKind;
 }
 
 export class ControlPointWriter {
@@ -76,8 +89,14 @@ export class ControlPointWriter {
   async resetResistance(): Promise<void> {
     if (this.#disposed || !this.#hasControl) return;
     this.#pendingSim = null;
+    // Front of the queue: a reset is typically the panic key, and must not
+    // sit behind whatever else is already queued — including a stale
+    // backlog of simulation writes a slow/unresponsive trainer has left
+    // piling up.
     await this.#enqueue(
       encodeSimulationParams({ grade: 0, headwind: 0, crr: 0.004, cw: 0.51 }),
+      'sim',
+      { front: true },
     );
   }
 
@@ -118,13 +137,35 @@ export class ControlPointWriter {
     if (p === null) return;
     this.#pendingSim = null;
     this.#lastSimAt = Date.now();
-    void this.#enqueue(encodeSimulationParams(p));
+    void this.#enqueue(encodeSimulationParams(p), 'sim');
   }
 
-  #enqueue(bytes: Uint8Array): Promise<boolean> {
+  #enqueue(
+    bytes: Uint8Array,
+    kind: QueueKind = 'other',
+    opts: { front?: boolean } = {},
+  ): Promise<boolean> {
     if (this.#disposed) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
-      this.#queue.push({ bytes, resolve });
+      // A simulation write (an ordinary grade, or a reset to flat) is
+      // inherently last-value-wins: once a newer one exists, an older
+      // queued-but-not-yet-in-flight one can never be worth sending. Drop
+      // it here rather than letting the queue grow without bound — this is
+      // what keeps a slow/unresponsive trainer (accepting writes but never
+      // indicating) from building up a backlog of increasingly stale
+      // grades, each destined to wait out the full write timeout before
+      // the next is even attempted.
+      if (kind === 'sim') {
+        const staleIndex = this.#queue.findIndex((e) => e.kind === 'sim');
+        if (staleIndex !== -1) {
+          const [stale] = this.#queue.splice(staleIndex, 1);
+          stale!.resolve(false);
+        }
+      }
+
+      const entry: QueueEntry = { bytes, resolve, kind };
+      if (opts.front) this.#queue.unshift(entry);
+      else this.#queue.push(entry);
       void this.#pump();
     });
   }

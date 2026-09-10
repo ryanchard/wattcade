@@ -141,6 +141,75 @@ describe('ControlPointWriter', () => {
     expect(Array.from(f.writes[0]!).slice(3, 5)).toEqual([0x00, 0x00]);
   });
 
+  it('keeps at most one queued simulation write when the trainer stops indicating, carrying the newest grade', async () => {
+    // Regression for the unbounded-queue finding: if a trainer accepts
+    // writes but stops indicating, the old code queued a new sim entry
+    // every >=250 ms forever, each waiting out the full 2 s timeout before
+    // the next was even attempted. A panic key issued minutes into that
+    // backlog would sit behind every stale grade queued before it.
+    const f = fakeTransport();
+    const w = new ControlPointWriter(f.transport, {
+      timeoutMs: 2000, simIntervalMs: 250,
+    });
+    await w.requestControl(); // succeeds normally: hasControl becomes true
+    f.writes.length = 0;
+    f.setAutoRespond(false); // now the trainer accepts writes but never indicates
+
+    // The first setSimulation's flush becomes the in-flight write (queue
+    // was empty), and gets stuck there since nothing ever indicates.
+    // Every later one queues instead of appending.
+    for (let i = 0; i < 5; i++) {
+      w.setSimulation({ ...SIM, grade: i });
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    expect(f.writes).toHaveLength(1); // only the first grade (0) ever went out
+
+    // Let the stuck in-flight write time out so the pump moves on to
+    // whatever is actually queued.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.writes).toHaveLength(2);
+
+    // If the queue had grown unbounded, this next write would carry grade
+    // 1 (the second call), not grade 4 (the newest) -- so the value alone
+    // distinguishes "replaced" from "appended".
+    const grade4 = 4 * 100; // 400 -> 0x0190
+    expect(Array.from(f.writes[1]!).slice(3, 5)).toEqual([
+      grade4 & 0xff, (grade4 >> 8) & 0xff,
+    ]);
+  });
+
+  it('writes a reset before any queued simulation command, even behind a backlog', async () => {
+    const f = fakeTransport();
+    const w = new ControlPointWriter(f.transport, {
+      timeoutMs: 2000, simIntervalMs: 250,
+    });
+    await w.requestControl();
+    f.writes.length = 0;
+    f.setAutoRespond(false);
+
+    // Occupy the in-flight slot with something else entirely (not a sim
+    // write), so both the queued sim write and the later reset have to
+    // wait behind it -- proving the reset jumps ahead of the backlog, not
+    // merely ahead of same-kind entries.
+    void w.stopOrPause(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.writes).toHaveLength(1); // stopOrPause is in flight, stuck
+
+    // Queue a stale-in-waiting simulation write behind it.
+    w.setSimulation({ ...SIM, grade: 6 });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(f.writes).toHaveLength(1); // still just stopOrPause; the sim write only queued
+
+    // The panic key: issued while that backlog sits ahead of it.
+    void w.resetResistance();
+
+    // Let stopOrPause's stuck write time out so the pump advances.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.writes).toHaveLength(2);
+    // The reset (grade 0), not the queued grade-6 sim write, must be next.
+    expect(Array.from(f.writes[1]!).slice(3, 5)).toEqual([0x00, 0x00]);
+  });
+
   it('stops writing after dispose', async () => {
     const f = fakeTransport();
     const w = new ControlPointWriter(f.transport);
