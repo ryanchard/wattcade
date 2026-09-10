@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_RIDER } from '@paperboy/trainer';
-import { BLOCK_LENGTH_M, classifyLanding } from '@paperboy/game-core';
+import {
+  BLOCK_LENGTH_M, SPRINKLER_OFF_S, SPRINKLER_ON_S, classifyLanding,
+} from '@paperboy/game-core';
 import {
   MAX_PAPERS, START_PAPERS, createWorld, ensureBlocks,
 } from '../src/world.js';
@@ -347,6 +349,26 @@ describe('collisions', () => {
     wDog.rider.lateral = dog.lateral;
     wDog.rider.distance = dog.distance + 2.0;
     expect(detectCollision(wDog)).toBeNull();
+  });
+
+  it('crashes on a sprinkler during its active phase but not during its inactive phase', () => {
+    // FINDING 1: a sprinkler drawn OFF must be genuinely harmless. Both
+    // phases are exercised on a rider parked exactly on the sprinkler, so
+    // the only thing that can flip the outcome is `isHazardActive`.
+    const sprinkler = hazard({ id: 'sprinkler-test', kind: 'sprinkler', phase: 0 });
+    const w = ready();
+    w.hazards = [sprinkler];
+    w.rider.lateral = sprinkler.lateral;
+    w.rider.distance = sprinkler.distance;
+
+    w.elapsed = 0;
+    expect(detectCollision(w)).toBe(sprinkler);
+
+    w.elapsed = SPRINKLER_ON_S + 0.5;
+    expect(detectCollision(w)).toBeNull();
+
+    w.elapsed = SPRINKLER_ON_S + SPRINKLER_OFF_S + 0.5;
+    expect(detectCollision(w)).toBe(sprinkler);
   });
 });
 

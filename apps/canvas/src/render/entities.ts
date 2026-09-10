@@ -17,6 +17,7 @@
  *     inside the collision box `rules.hazardHalfDepth` uses, or the sprite
  *     and the hitbox disagree. See `HAZARD_DRAW_DEPTH_M`.
  */
+import { isHazardActive } from '@paperboy/game-core';
 import { PALETTE, hashPick, shade } from './palette.js';
 import {
   box, groundEllipse, groundGlow, groundQuad, pointGlow, polygon, prism,
@@ -125,8 +126,10 @@ export function houseIsLit(house: HouseState): boolean {
 function drawWindow(
   d: DrawCtx, house: HouseState, lit: boolean,
 ): void {
-  // `windowLateral` is the paper's smash target; the pane it names is drawn
-  // on the road-facing wall at the house's window station.
+  // The paper's smash target is the fixed global WINDOW_LATERAL band that
+  // `classifyLanding` (packages/game-core/src/landing.ts) checks against —
+  // NOT this house's `windowLateral` field, which only positions the pane
+  // drawn here on the road-facing wall at the house's window station.
   const wd = house.spec.distance - 2.2;
   const panes = hashPick(`${house.spec.id}w`, PANE_COUNT);
   const paneW = 0.58;
@@ -567,9 +570,12 @@ function drawDog(d: DrawCtx, h: HazardState, colour: string): void {
     left: shade(colour, 0.9),
     right: shade(colour, 1.02),
   });
-  // Snout — the single detail that stops a dog reading as a bin.
+  // Snout — the single detail that stops a dog reading as a bin. Centred at
+  // dist + 0.40 with depth 0.18 (half-depth 0.09), its far edge reaches
+  // dist + 0.49 — just inside hazardHalfDepth('dog') = 0.5, per this
+  // module's footprint-honesty invariant.
   box(d, {
-    distance: dist + 0.44, lateral: lat,
+    distance: dist + 0.40, lateral: lat,
     depth: 0.18, width: wide * 0.34, height: 0.14, base: 0.48,
     top: shade(PALETTE.dogSnout, 1.1),
     left: shade(PALETTE.dogSnout, 0.9),
@@ -686,8 +692,10 @@ function drawSprinkler(
   const lat = h.lateral;
   const reach = h.spec.width;
 
-  // The wet patch is always drawn. The sprinkler is a hazard on every frame,
-  // so the ground under it must never read as safe even between bursts.
+  // The damp patch is always drawn, but it is scenery, not a danger signal —
+  // now that an off sprinkler is genuinely harmless (`isHazardActive`, the
+  // same rule `detectCollision` consults), the spray below is the only
+  // thing that is allowed to say "this ground is live right now".
   groundEllipse(d, dist, lat, reach * 0.55, reach * 0.5, PALETTE.lawnWet);
 
   box(d, {
@@ -705,10 +713,13 @@ function drawSprinkler(
     right: shade(colour, 1.1),
   });
 
-  const phase = h.spec.phase * TAU;
-  if (Math.sin(elapsed * 1.1 + phase) <= -0.15) return;
+  // The spray is the danger signal, so it is drawn if and only if
+  // `isHazardActive` says this sprinkler is actually live right now — the
+  // exact predicate `detectCollision` gates the hitbox on.
+  if (!isHazardActive(h.spec, elapsed)) return;
 
   // Oscillating fan of droplets: two trailing arcs so the spray has body.
+  const phase = h.spec.phase * TAU;
   const sweep = Math.sin(elapsed * 2.4 + phase);
   for (let arc = 0; arc < 2; arc++) {
     const angle = sweep * 0.95 - arc * 0.3;

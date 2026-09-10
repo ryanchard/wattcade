@@ -1,5 +1,5 @@
 import {
-  BLOCK_LENGTH_M, applyScoreEvent, classifyLanding,
+  BLOCK_LENGTH_M, applyScoreEvent, classifyLanding, isHazardActive,
 } from '@paperboy/game-core';
 import type { HazardKind, LandingOutcome, ScoreEvent } from '@paperboy/game-core';
 import type { RiderProfile } from '@paperboy/trainer';
@@ -166,6 +166,11 @@ export function collectStacks(w: WorldState): void {
 export function detectCollision(w: WorldState): HazardState | null {
   if (w.elapsed < w.rider.invulnerableUntil) return null;
   for (const h of w.hazards) {
+    // A sprinkler in its off phase is drawn safe (see `drawSprinkler` in
+    // render/entities.ts, which consults the same `isHazardActive`) and
+    // must genuinely be safe — otherwise the game shows a harmless state
+    // and then punishes the player for trusting it.
+    if (!isHazardActive(h.spec, w.elapsed)) continue;
     const dGap = Math.abs(h.distance - w.rider.distance);
     if (dGap > RIDER_HALF_LENGTH + hazardHalfDepth(h.spec.kind)) continue;
     const lGap = Math.abs(h.lateral - w.rider.lateral);

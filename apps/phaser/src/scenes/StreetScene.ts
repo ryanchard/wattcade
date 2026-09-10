@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { DEFAULT_RIDER } from '@paperboy/trainer';
+import { isHazardActive } from '@paperboy/game-core';
 import type { HazardSpec, HouseSpec } from '@paperboy/game-core';
 import { PX_PER_M, project, toBodyX, toBodyY } from '../iso.js';
 import type { EntityRecord } from '../logic/entities.js';
@@ -7,7 +8,7 @@ import { FIXED_DT, MAX_SUBSTEPS, PaperboyRun } from '../logic/run.js';
 import type { RunInput } from '../logic/run.js';
 import {
   COLOURS, drawHazardView, drawHouseView, drawPaperView, drawRiderView,
-  drawStackView,
+  drawSprinklerSprayView, drawStackView,
 } from '../views.js';
 
 interface HazardView {
@@ -16,6 +17,14 @@ interface HazardView {
   spec: HazardSpec;
   distance: number;
   lateral: number;
+  /**
+   * The sprinkler-only spray overlay, drawn once and then only shown or
+   * hidden per frame (see `#syncHazardLooks`) against `isHazardActive` —
+   * the same predicate `#checkCollisions` gates the hitbox on, so the
+   * spray can never be visible while the sprinkler is actually harmless,
+   * or hidden while it can still crash the rider.
+   */
+  spray: Phaser.GameObjects.Graphics | null;
 }
 
 export class StreetScene extends Phaser.Scene {
@@ -138,6 +147,7 @@ export class StreetScene extends Phaser.Scene {
     }
 
     this.#moveHazards(run, frameDt);
+    this.#syncHazardLooks(run);
     this.#syncPapers(run);
     this.#drawGround(run);
     this.#syncPositions(run);
@@ -179,7 +189,18 @@ export class StreetScene extends Phaser.Scene {
   #addHazard(id: string, spec: HazardSpec): void {
     const g = this.add.graphics();
     drawHazardView(g, spec);
-    const container = this.add.container(0, 0, [g]);
+
+    // A sprinkler gets its spray drawn once into its own Graphics, layered
+    // above the base box, so `#syncHazardLooks` can show or hide it per
+    // frame without redrawing anything.
+    let spray: Phaser.GameObjects.Graphics | null = null;
+    const children: Phaser.GameObjects.Graphics[] = [g];
+    if (spec.kind === 'sprinkler') {
+      spray = this.add.graphics();
+      drawSprinklerSprayView(spray);
+      children.push(spray);
+    }
+    const container = this.add.container(0, 0, children);
 
     // X is distance, Y is lateral (see the rider zone in create()). The
     // hazard's depth (along the road) is its X extent and spec.width
@@ -194,7 +215,7 @@ export class StreetScene extends Phaser.Scene {
     this.physics.add.existing(zone);
 
     this.#hazards.set(id, {
-      container, zone, spec,
+      container, zone, spec, spray,
       distance: spec.distance,
       lateral: spec.lateral,
     });
@@ -214,6 +235,20 @@ export class StreetScene extends Phaser.Scene {
         v.distance = v.spec.distance + Math.sin(t * 0.4) * 2;
       }
       v.zone.setPosition(toBodyX(v.distance), toBodyY(v.lateral));
+    }
+  }
+
+  /**
+   * Shows or hides each sprinkler's spray overlay against `isHazardActive`
+   * — the identical predicate `#checkCollisions` uses to gate the hitbox —
+   * so an inactive sprinkler always LOOKS safe and an active one always
+   * LOOKS dangerous. Every other hazard kind has no `spray` and is a no-op
+   * here.
+   */
+  #syncHazardLooks(run: PaperboyRun): void {
+    for (const v of this.#hazards.values()) {
+      if (v.spray === null) continue;
+      v.spray.setVisible(isHazardActive(v.spec, run.elapsed));
     }
   }
 
@@ -295,6 +330,12 @@ export class StreetScene extends Phaser.Scene {
   #checkCollisions(run: PaperboyRun): void {
     if (run.invulnerable) return;
     for (const v of this.#hazards.values()) {
+      // A sprinkler in its off phase is drawn safe (see `#syncHazardLooks`,
+      // which consults this same `isHazardActive`) and must genuinely be
+      // safe — otherwise the game shows a harmless state and then punishes
+      // the player for trusting it. Every other hazard kind is always
+      // active, matching Version A's `detectCollision`.
+      if (!isHazardActive(v.spec, run.elapsed)) continue;
       // An explicit Arcade query, rather than a registered collider, so the
       // check happens after this frame's positions are final.
       if (this.physics.world.overlap(this.#riderZone, v.zone)) {

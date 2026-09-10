@@ -128,6 +128,9 @@ export const GLOW_STOPS: ReadonlyArray<readonly [number, string]> = [
  * `Math.random` here would make the street shimmer.
  */
 export function hashPick<T>(id: string, items: readonly T[]): T {
+  if (items.length === 0) {
+    throw new Error('hashPick: items must be non-empty');
+  }
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return items[h % items.length]!;

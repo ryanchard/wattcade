@@ -23,6 +23,8 @@ export const COLOURS = {
   drain: 0x2a2e3d,
   bin: 0x4c5a4a,
   skater: 0xd98d3f,
+  water: 0xbfe6f2,
+  waterDim: 0x7fa9bd,
 } as const;
 
 const shade = (colour: number, amount: number): number => {
@@ -77,6 +79,51 @@ function box(
     ] as Phaser.Types.Math.Vector2Like[],
     true,
   );
+}
+
+/**
+ * Local pixel offset for a point `depthOffsetM` along the street and
+ * `lateralOffsetM` across it (both metres, relative to the container's own
+ * origin) and `heightM` above the ground — the same isometric skew `box()`
+ * above uses for its corners, factored out so other local geometry (the
+ * sprinkler spray below) can be placed in the same frame without going
+ * through a full box.
+ */
+function isoLocalPoint(
+  depthOffsetM: number, lateralOffsetM: number, heightM: number,
+): { x: number; y: number } {
+  const { tileW, tileH, heightScale } = PHASER_ISO;
+  return {
+    x: tileW * (depthOffsetM + lateralOffsetM),
+    y: tileH * (lateralOffsetM - depthOffsetM) - heightM * heightScale,
+  };
+}
+
+/**
+ * The sprinkler's danger signal: two fans of droplets arcing up and out to
+ * each side of the head. Drawn into its own Graphics so `StreetScene` can
+ * toggle it visible/hidden per frame against `isHazardActive` without
+ * touching the always-on base box drawn by `drawHazardView` — an inactive
+ * sprinkler must read as obviously safe, an active one as obviously
+ * dangerous, and the toggle is what keeps that promise in sync with
+ * collision.
+ */
+export function drawSprinklerSprayView(g: Phaser.GameObjects.Graphics): void {
+  const dropletsPerArc = 5;
+  for (const side of [-1, 1] as const) {
+    const tint = side === -1 ? COLOURS.water : COLOURS.waterDim;
+    for (let i = 1; i <= dropletsPerArc; i++) {
+      const u = i / dropletsPerArc;
+      const lateralOffsetM = side * 0.55 * u;
+      const depthOffsetM = 0.12 * u;
+      // Arcs up then back down, peaking around the midpoint of the reach.
+      const heightM = 0.15 + 0.7 * u * (1 - u) * 4;
+      const { x, y } = isoLocalPoint(depthOffsetM, lateralOffsetM, heightM);
+      const radius = 3 * (1 - u) + 1.2;
+      g.fillStyle(tint, 0.9);
+      g.fillCircle(x, y, radius);
+    }
+  }
 }
 
 export function drawHouseView(
