@@ -8,10 +8,9 @@
  * the shell hands over, and keeps the same two keys so nobody loses progress.
  */
 import type {
-  GameCreateOptions, GameModule, GameSession, GameVariant, HudLine, RunResult,
-  SimulationParams,
+  GameCreateOptions, GameModule, GameSession, GameVariant, HudLine,
+  RiderProfile, RunResult, SimulationParams,
 } from '@paperboy/game-api';
-import type { RiderProfile } from '@paperboy/trainer';
 import { drawHud } from './hud.js';
 import { poster } from './poster.js';
 import { createRenderState, renderScene, updateRenderState } from './render.js';
@@ -129,6 +128,10 @@ class VelodromeSession implements GameSession {
     const margin = Math.abs(r.marginM).toFixed(1);
     const lines: HudLine[] = [
       { label: 'sheltered', value: `${Math.round(r.draftShare * 100)}% of the race` },
+      {
+        label: 'battery left',
+        value: `${Math.round(r.batteryLeft * 100)}% of your store`,
+      },
     ];
     if (!r.aborted) {
       lines.push({ label: 'tell', value: this.#spec.tell });

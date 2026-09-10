@@ -1,5 +1,9 @@
-import type { RiderProfile, SimulationParams } from '@paperboy/trainer';
-import { clampGrade, stepPhysics } from '@paperboy/trainer';
+import type { RiderProfile, SimulationParams } from '@paperboy/game-api';
+import {
+  advanceWPrime, createWPrime, criticalPower, sustainablePower, wPrimeFraction,
+} from '@paperboy/game-core';
+import type { WPrimeState } from '@paperboy/game-core';
+import { AIR_DENSITY, G, clampGrade, stepPhysics } from '@paperboy/trainer';
 import type { MoveMemory, RivalContext, RivalSpec } from './rivals.js';
 import { createMoveMemory, rivalPowerFraction } from './rivals.js';
 
@@ -16,6 +20,15 @@ import { createMoveMemory, rivalPowerFraction } from './rivals.js';
  * demand, about 100 W at racing speed. There is nothing else on a track with
  * anything like that leverage, so the draft is the only tactic that matters
  * and everything in this module serves it.
+ *
+ * AND BOTH RIDERS HAVE A BATTERY. Every watt either of them puts above
+ * critical power comes out of a finite store (`@paperboy/game-core`'s W-prime),
+ * and when a store is gone that rider fades back toward CP and cannot kick.
+ * Neither side is exempt: the player's drains from their measured power, the
+ * rival's from its scripted power, on the identical implementation. That is
+ * what makes "force the pace" a mechanism, what stops one big sprint winning
+ * every race on the ladder, and what makes sitting in worth something you
+ * still have at the finish rather than only in the moment.
  */
 
 // ---------------------------------------------------------------------------
@@ -96,6 +109,16 @@ export interface RaceRider {
   speed: number;
   powerTarget: number;
   powerCurrent: number;
+  /**
+   * What actually reached the road: `powerCurrent` after the anaerobic store
+   * has had its say. Identical to it until the store runs low, and then it
+   * sags toward CP. This — not `powerCurrent` — is what drives the physics
+   * and what the store itself is debited for, so an empty rider self-limits
+   * instead of hammering a balance that is already at zero.
+   */
+  powerEffective: number;
+  /** The anaerobic store. Capacity comes from the rider profile. */
+  wPrime: WPrimeState;
   kilojoules: number;
   /** Whether this rider was sheltered during the most recent step. */
   drafting: boolean;
@@ -120,6 +143,9 @@ export interface RaceState {
   paused: boolean;
   finished: boolean;
   winner: Winner;
+  /** Critical power in watts, for both riders: they race on one profile, so
+   * "a fraction of your FTP" means the same thing on both sides of the gap. */
+  criticalPowerW: number;
   /** True when the rider hit the Escape safety stop rather than finishing. */
   aborted: boolean;
   finishTimeS: number;
@@ -128,10 +154,11 @@ export interface RaceState {
   accumulator: number;
 }
 
-function createRider(): RaceRider {
+function createRider(profile: RiderProfile): RaceRider {
   return {
     distance: 0, speed: 0, powerTarget: 0,
-    powerCurrent: 0, kilojoules: 0, drafting: false, draftedS: 0,
+    powerCurrent: 0, powerEffective: 0, wPrime: createWPrime(profile),
+    kilojoules: 0, drafting: false, draftedS: 0,
   };
 }
 
@@ -139,8 +166,9 @@ export function createRace(profile: RiderProfile, spec: RivalSpec): RaceState {
   return {
     profile,
     spec,
-    player: createRider(),
-    rival: createRider(),
+    player: createRider(profile),
+    rival: createRider(profile),
+    criticalPowerW: criticalPower(profile),
     moveMemory: createMoveMemory(spec),
     elapsed: 0,
     gap: 0,
@@ -189,6 +217,34 @@ export function draftedProfile(profile: RiderProfile): RiderProfile {
   return { ...profile, cdA: profile.cdA * DRAFT_CDA_RATIO };
 }
 
+/**
+ * What the hole in the air is WORTH, in watts, to a rider sheltered at
+ * `speed`. Zero at a standstill and about 50 W at this game's track pace.
+ *
+ * Subtracted, not scaled, because that is what a draft physically does: it
+ * removes part of one resistive force. Only the air term moves — rolling
+ * resistance is unchanged by the wheel in front, and, crucially, so is the
+ * power going into ACCELERATION. Scaling the whole demand by a steady-state
+ * ratio would have had a sheltered rival accelerating more slowly than the
+ * rider it was sitting on, dropping the wheel in the first ten seconds of
+ * every race and rediscovering the wind. Both riders leave the line level,
+ * so those ten seconds happen every time.
+ *
+ * For the default rider on the flat:
+ *
+ *   |    speed | air drag | shelter is worth |
+ *   | -------: | -------: | ---------------: |
+ *   |    2 m/s |    0.8 N |              1 W |
+ *   |    6 m/s |    7.1 N |             13 W |
+ *   |  9.6 m/s |   18.1 N |             53 W |
+ *   |   13 m/s |   33.1 N |            130 W |
+ */
+export function draftSavingWatts(profile: RiderProfile, speed: number): number {
+  const v = Math.max(0, speed);
+  const air = 0.5 * AIR_DENSITY * profile.cdA * v * v;
+  return (air * (1 - DRAFT_CDA_RATIO) * v) / profile.drivetrainEfficiency;
+}
+
 /** The wind resistance coefficient to send to the trainer for a rider in
  * this state. Pure, and the single source of truth for both the FTMS write
  * and the streaming-air the renderer draws. */
@@ -221,14 +277,41 @@ function easeToward(current: number, target: number, tau: number, dt: number): n
   return current + (target - current) * (1 - Math.exp(-dt / tau));
 }
 
+/**
+ * Spends one rider's store for this step and says what their legs actually
+ * produce. Runs for BOTH riders, on the same function, because a rule that
+ * applied to one of them would be a handicap rather than a model.
+ */
+function spend(r: RaceRider, cp: number, dt: number): void {
+  r.powerEffective = sustainablePower(
+    r.powerCurrent, cp, wPrimeFraction(r.wPrime),
+  );
+  // Debited for what the legs produced, not for what was asked of them: the
+  // fade is the reason a store can approach empty without ever being asked
+  // to go past it.
+  advanceWPrime(r.wPrime, r.powerEffective, cp, dt);
+}
+
 export function advance(s: RaceState, dt: number): void {
   if (s.paused || s.finished) return;
+
+  // Shelter is decided from the gap at the top of the step. It has to be
+  // known before the rival picks its power, because sitting in changes what
+  // holding the pace costs it — and it decides the drag both riders are then
+  // integrated with.
+  s.player.drafting = playerDrafting(s.gap, s.player.drafting);
+  s.rival.drafting = rivalDrafting(s.gap, s.rival.drafting);
+  if (s.player.drafting) s.player.draftedS += dt;
+  if (s.rival.drafting) s.rival.draftedS += dt;
 
   // The player's watts, eased rather than stepped.
   s.player.powerCurrent = easeToward(
     s.player.powerCurrent, s.player.powerTarget, POWER_TAU_S, dt,
   );
+  // Their power meter recorded what their legs did, whatever the store had
+  // left to turn it into speed, so the results card reads the honest figure.
   s.player.kilojoules += (s.player.powerCurrent * dt) / 1000;
+  spend(s.player, s.criticalPowerW, dt);
 
   // The rival's watts, from its archetype. Everything the behaviour function
   // can see is in this context; there is no hidden clock and no RNG, so the
@@ -239,20 +322,20 @@ export function advance(s: RaceState, dt: number): void {
     gap: s.gap,
     closingRate: s.player.speed - s.rival.speed,
     playerEffort: s.player.powerCurrent / Math.max(1, s.profile.ftpWatts),
+    shelterSaving: s.rival.drafting
+      ? draftSavingWatts(s.profile, s.rival.speed)
+        / Math.max(1, s.profile.ftpWatts)
+      : 0,
+    battery: wPrimeFraction(s.rival.wPrime),
+    playerBattery: wPrimeFraction(s.player.wPrime),
   };
   s.rival.powerTarget =
     rivalPowerFraction(s.spec, ctx, s.moveMemory) * s.profile.ftpWatts;
   s.rival.powerCurrent = easeToward(
     s.rival.powerCurrent, s.rival.powerTarget, RIVAL_POWER_TAU_S, dt,
   );
-  s.rival.kilojoules += (s.rival.powerCurrent * dt) / 1000;
-
-  // Shelter is decided from the gap at the top of the step, and both riders
-  // are then integrated with the drag that implies.
-  s.player.drafting = playerDrafting(s.gap, s.player.drafting);
-  s.rival.drafting = rivalDrafting(s.gap, s.rival.drafting);
-  if (s.player.drafting) s.player.draftedS += dt;
-  if (s.rival.drafting) s.rival.draftedS += dt;
+  spend(s.rival, s.criticalPowerW, dt);
+  s.rival.kilojoules += (s.rival.powerEffective * dt) / 1000;
 
   const grade = clampGrade(TRACK_GRADE_PERCENT);
   const stepRider = (r: RaceRider): void => {
@@ -260,7 +343,7 @@ export function advance(s: RaceState, dt: number): void {
     const next = stepPhysics(
       { speed: r.speed, distance: r.distance },
       {
-        powerWatts: r.powerCurrent,
+        powerWatts: r.powerEffective,
         gradePercent: grade,
         crr: s.profile.crr,
         headwind: 0,
@@ -365,6 +448,9 @@ export interface RaceResult {
   avgPower: number;
   /** Fraction of the race the player spent sheltered, 0..1. */
   draftShare: number;
+  /** What was left of the player's anaerobic store at the line, 0..1. The
+   * one number that says whether the ride was paced or merely survived. */
+  batteryLeft: number;
 }
 
 export function toRaceResult(s: RaceState): RaceResult {
@@ -377,5 +463,6 @@ export function toRaceResult(s: RaceState): RaceResult {
       ? Math.round((s.player.kilojoules * 1000) / s.elapsed) : 0,
     draftShare: s.elapsed > 0
       ? Math.min(1, Math.max(0, s.player.draftedS / s.elapsed)) : 0,
+    batteryLeft: wPrimeFraction(s.player.wPrime),
   };
 }

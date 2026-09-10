@@ -36,6 +36,7 @@ interface Sample {
   rivalDistance: number;
   rivalPower: number;
   playerDrafting: boolean;
+  rivalDrafting: boolean;
 }
 
 /** Ride a whole race at a scripted player effort. Returns the final state
@@ -60,6 +61,7 @@ function ride(
         rivalDistance: state.rival.distance,
         rivalPower: state.rival.powerCurrent,
         playerDrafting: state.player.drafting,
+        rivalDrafting: state.rival.drafting,
       });
       nextSample += 1;
     }
@@ -358,25 +360,36 @@ describe('the fixed timestep', () => {
 // ---------------------------------------------------------------------------
 
 describe('the Diesel, ridden', () => {
-  it('holds one speed all race — the tell is that nothing ever changes', () => {
+  it('holds one number all race — the tell is that nothing ever changes', () => {
     const { samples } = ride(DIESEL, flat(240));
-    const powers = samples.slice(5).map((s) => s.rivalPower);
-    const min = Math.min(...powers);
-    const max = Math.max(...powers);
-    expect(max - min).toBeLessThan(1);
+    // On the front, which is where he rides the race, the number is dead
+    // flat. Sitting in somebody's draft he pays less for the same pace (see
+    // RIVAL_SHELTER_BANK), and everyone leaves the line level, so the first
+    // few seconds of every race are the exception.
+    // Two seconds of clearance either side of the sample, because his power
+    // is eased with a 0.6 s time constant and pulling out of a wheel is a
+    // change of effort like any other.
+    const onTheFront = samples.filter((s, i) =>
+      i >= 5 && samples.slice(i - 2, i + 1).every((x) => !x.rivalDrafting));
+    expect(onTheFront.length).toBeGreaterThan(40);
+    const powers = onTheFront.map((s) => s.rivalPower);
+    expect(Math.max(...powers) - Math.min(...powers)).toBeLessThan(1);
   });
 
   it('is beaten by sitting in and coming past at the end', () => {
-    // Ride the Diesel's own pace out in the wind and you lose...
+    // Match his watts out in the wind and, at best, you dead-heat: he is
+    // sitting in the hole you are making, which is worth about 50 W at track
+    // pace, so his 221 W and your 221 W are not the same ride.
     const inTheWind = ride(DIESEL, flat(0.92 * PROFILE.ftpWatts)).state;
-    expect(inTheWind.winner).toBe('rival');
+    expect(Math.abs(inTheWind.gap)).toBeLessThan(3);
 
-    // ...sit in on the same watts and jump at the bell, and you win.
+    // ...sit in on the same watts and jump at the bell, and you win properly.
     const sittingIn = ride(DIESEL, (s) => {
       if (s.player.distance > 880) return 1.5 * PROFILE.ftpWatts;
       return s.gap < -3 ? 0.55 * PROFILE.ftpWatts : 0.9 * PROFILE.ftpWatts;
     }).state;
     expect(sittingIn.winner).toBe('player');
+    expect(sittingIn.gap).toBeGreaterThan(3);
   });
 });
 

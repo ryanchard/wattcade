@@ -1,3 +1,4 @@
+import { FADE_FROM_FRACTION, wPrimeFraction } from '@paperboy/game-core';
 import { DISPLAY_FONT, INK, KIT, LABEL_FONT, PALETTE } from './palette.js';
 import { metresRemaining } from './race.js';
 import type { RaceState } from './race.js';
@@ -15,7 +16,20 @@ import { drawTabular } from './text.js';
  * There is deliberately no draft indicator. Whether the rider is sheltered is
  * told by the air on the boards and by the trainer under them; adding a badge
  * here would let a rider read the icon instead of feeling the wheel.
+ *
+ * The BATTERY is the opposite case and has to be here. Nothing in the world
+ * shows an anaerobic store draining — a rider cannot see it on the boards, in
+ * the air or through the flywheel — so without a readout the one mechanic that
+ * decides the race is invisible, and losing to it feels arbitrary rather than
+ * earned. It is drawn as a bar because the shape of it is what matters while
+ * breathing hard: how much is left and which way it is going, at a glance,
+ * without reading a number.
  */
+
+/** Where the bar turns red. Derived from the model's own fade threshold
+ * rather than picked, and set half again above it, so the warning arrives
+ * while there is still a decision to make about it. */
+const BATTERY_WARN_BELOW = FADE_FROM_FRACTION * 1.5;
 
 function label(
   c: CanvasRenderingContext2D, text: string, x: number, y: number,
@@ -53,6 +67,28 @@ export function drawHud(
   c.fillRect(unit * 2, barY, Math.min(barW, barW * (ftpRatio / 1.6)), unit * 0.5);
   c.fillStyle = INK.textFaint;
   c.fillRect(unit * 2 + barW / 1.6, barY - unit * 0.25, 1.5, unit);
+
+  // --- the battery, under the watts. Bigger than the FTP tick above it,
+  // because this is the number that decides whether the finish exists.
+  const battery = wPrimeFraction(s.player.wPrime);
+  const low = battery < BATTERY_WARN_BELOW;
+  const bY = unit * 14.2;
+  const bH = unit * 1.6;
+  c.fillStyle = 'rgba(255, 244, 220, 0.10)';
+  c.fillRect(unit * 2, bY, barW, bH);
+  c.fillStyle = low ? PALETTE.sprintLine : PALETTE.cote;
+  c.fillRect(unit * 2, bY, barW * battery, bH);
+  // A tick at the point the legs start to go, so an emptying bar has
+  // somewhere to be emptying TO.
+  c.fillStyle = INK.textFaint;
+  c.fillRect(unit * 2 + barW * BATTERY_WARN_BELOW, bY - unit * 0.3, 1.5, bH + unit * 0.6);
+  c.fillStyle = low ? PALETTE.sprintLine : INK.text;
+  drawTabular(
+    c, `${Math.round(battery * 100)}%`, unit * 2, bY - unit * 0.9,
+    `800 ${unit * 2.6}px ${DISPLAY_FONT}`,
+  );
+  label(c, 'battery', unit * 2, bY + bH + unit * 1.5, 'left',
+    low ? 'rgba(194, 55, 47, 0.85)' : INK.textDim);
 
   // --- what is left of the race, top centre.
   const toGo = Math.round(metresRemaining(s.player.distance));

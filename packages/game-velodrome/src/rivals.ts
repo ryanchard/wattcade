@@ -20,6 +20,36 @@
 // Shared tunables
 // ---------------------------------------------------------------------------
 
+/**
+ * How much of the shelter a rival BANKS rather than spends, when it is
+ * sitting in and riding tempo rather than making a move.
+ *
+ * A draft can be taken as speed or as energy and not both: at a given power
+ * you go faster, at a given pace you pay less. Taking all of it as speed was
+ * the old behaviour, and it is why a rival could never be worn down — the
+ * saving was gone the instant it was made. Taking all of it as energy is
+ * worse: a scripted rival glued to your wheel at exactly your pace would
+ * never come past, and leading a whole race would cost nothing.
+ *
+ * A real rider does both, so this splits it. At 0.6 a sheltered rival keeps
+ * about 32 W of the ~53 W the wheel is worth at track pace and puts the rest
+ * into closing on it.
+ *
+ * Raise it and rivals wear down faster but sit behind more meekly; drop it
+ * and they come past readily but arrive at the finish fresher.
+ */
+export const RIVAL_SHELTER_BANK = 0.5;
+
+/**
+ * The Wheelsucker's own accounting: below this much battery it will not
+ * spend above SHELTER_SAVE_CEILING to hold a wheel. It refuses to lead
+ * partly because it is saving, and the moment saving and station-keeping
+ * conflict, saving wins — which is what makes forcing the pace a real way
+ * to get rid of it rather than a line on a results card.
+ */
+export const SHELTER_SAVE_BELOW = 0.55;
+export const SHELTER_SAVE_CEILING = 1.05;
+
 /** Hard floor/ceiling on any rival's power, as a fraction of player FTP. */
 export const RIVAL_MIN_FRACTION = 0;
 export const RIVAL_MAX_FRACTION = 2.2;
@@ -45,6 +75,12 @@ export const CHAMPION_PUNISH = 0.34;
 export const CHAMPION_SPRINT_FROM = 0.88;
 export const CHAMPION_SPRINT_WITHIN_M = 25;
 export const CHAMPION_SPRINT_FRACTION = 1.6;
+/** She watches the rider's body, not their power meter: when the player is
+ * this near the bottom of their store she goes, whatever the script says. */
+export const CHAMPION_ATTACK_WHEN_SPENT = 0.22;
+export const CHAMPION_ATTACK_FRACTION = 1.38;
+/** ...and she does not answer an attack she cannot afford. */
+export const CHAMPION_HOLD_FIRE_BELOW = 0.18;
 
 // ---------------------------------------------------------------------------
 // Move shapes
@@ -150,6 +186,25 @@ export interface RivalContext {
   readonly closingRate: number;
   /** Player's current (eased) power as a fraction of their own FTP. */
   readonly playerEffort: number;
+  /**
+   * What the shelter is worth to the rival right now, as a fraction of the
+   * player's FTP: zero out in the wind, and `race.ts`'s `draftSavingWatts`
+   * when sitting in.
+   *
+   * Drafting used to be pure free speed for a rival — same watts, less drag,
+   * away up the road — which is exactly why a rival could never be worn down:
+   * the shelter it banked was spent in the moment instead of stored. A rider
+   * sitting on a wheel does not ride past just because it got easier; it
+   * holds the pace and keeps the difference. So a base curve is read as an
+   * INTENDED PACE, and this is what that pace costs less of from here.
+   */
+  readonly shelterSaving: number;
+  /** What is left of the rival's OWN anaerobic store, 0..1. */
+  readonly battery: number;
+  /** What is left of the player's, 0..1. Not a number the rival could read
+   * off a screen — it is what a racer sees in someone's shoulders when they
+   * are finished, and the only thing any archetype does with it is go. */
+  readonly playerBattery: number;
 }
 
 function sampleCurve(curve: PowerCurve, x: number): number {
@@ -169,6 +224,10 @@ function sampleCurve(curve: PowerCurve, x: number): number {
 }
 
 function shelterFraction(base: number, ctx: RivalContext): number {
+  // Saving beats station-keeping. A wheelsucker with nothing left would
+  // rather lose the wheel than lose the sprint, so the ceiling comes down.
+  const ceiling = ctx.battery < SHELTER_SAVE_BELOW
+    ? SHELTER_SAVE_CEILING : SHELTER_MAX_FRACTION;
   // Refuses to lead, full stop. If the player has dropped in behind, the
   // Wheelsucker soft-pedals until the player is forced back to the front.
   if (ctx.gap < 0) return SHELTER_MIN_FRACTION;
@@ -181,21 +240,32 @@ function shelterFraction(base: number, ctx: RivalContext): number {
   const error = ctx.gap - SHELTER_GAP_M;
   const gain = error > 0 ? SHELTER_GAIN_BEHIND : SHELTER_GAIN_CLOSE;
   const f = base + gain * error + SHELTER_DAMPING * ctx.closingRate;
-  return Math.min(SHELTER_MAX_FRACTION, Math.max(SHELTER_MIN_FRACTION, f));
+  return Math.min(ceiling, Math.max(SHELTER_MIN_FRACTION, f));
 }
 
 function adaptiveFraction(base: number, ctx: RivalContext): number {
   let f = base;
 
-  if (ctx.playerEffort > CHAMPION_COVER_ABOVE) {
-    // Covers the attack — but only up to a ceiling. A rider strong enough to
-    // hold well above their FTP can still ride away; the exam is passable.
+  if (
+    ctx.playerEffort > CHAMPION_COVER_ABOVE
+    && ctx.battery >= CHAMPION_HOLD_FIRE_BELOW
+  ) {
+    // Covers the attack — but only up to a ceiling, and only while she can
+    // still afford to. A rider strong enough to hold well above their FTP can
+    // still ride away; the exam is passable.
     f = Math.max(f, Math.min(
       CHAMPION_COVER_CEILING, ctx.playerEffort * CHAMPION_COVER_MATCH,
     ));
   } else if (ctx.playerEffort < CHAMPION_EASE_BELOW) {
     // Punishes a lull. Easing off in front of this one is an invitation.
     f += CHAMPION_PUNISH;
+  }
+
+  // Goes when the rider is spent, which is the whole of her character: she
+  // rides the race you are riding, and she can see when you have stopped
+  // being able to ride it.
+  if (ctx.playerBattery < CHAMPION_ATTACK_WHEN_SPENT) {
+    f = Math.max(f, CHAMPION_ATTACK_FRACTION);
   }
 
   if (
@@ -218,7 +288,19 @@ function adaptiveFraction(base: number, ctx: RivalContext): number {
 export function rivalPowerFraction(
   spec: RivalSpec, ctx: RivalContext, memory: MoveMemory,
 ): number {
-  let base = sampleCurve(spec.baseCurve, ctx.progress);
+  // The base curve is an intended pace, so shelter is banked rather than
+  // spent — except for a station-keeper, whose power is not a script at all
+  // but a controller seeking the wheel in front. That already settles at
+  // whatever holding the wheel costs, and discounting its seed would only
+  // make it fight itself.
+  //
+  // A MOVE IS NEVER DISCOUNTED. Everything added below — a surge, a feint,
+  // the late jump, the Champion covering an attack — costs the same wherever
+  // the rider is sitting. Shelter makes the tempo cheap; committing costs
+  // what it costs.
+  const saving = spec.tactic === 'shelter'
+    ? 0 : ctx.shelterSaving * RIVAL_SHELTER_BANK;
+  let base = Math.max(0, sampleCurve(spec.baseCurve, ctx.progress) - saving);
 
   let fromMoves = 0;
   let recovering = false;
@@ -283,9 +365,9 @@ export const FLYER: RivalSpec = {
   tell: 'An opening lap nobody on earth could hold for four.',
   counter: 'Do not chase. Ride your own tempo and they come back to you.',
   // Average is about 0.93 of the player's FTP, but spent so unevenly that an
-  // even effort at the same average covers the kilometre faster. There is no
-  // fatigue model in this game on purpose — the rider's own legs are it — so
-  // the punishment for panicking is delivered by the trainer, not the code.
+  // even effort at the same average covers the kilometre faster. The opening
+  // lap is well above threshold, so he now pays for it out of his own store
+  // as well — and a rider who panics and chases pays out of theirs.
   baseCurve: [
     [0, 1.42], [0.12, 1.30], [0.30, 0.95],
     [0.50, 0.80], [0.70, 0.67], [0.85, 0.57], [1, 0.50],

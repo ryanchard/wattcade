@@ -8,7 +8,8 @@ import type { RivalContext, RivalMove } from '../src/rivals.js';
 
 function ctx(over: Partial<RivalContext> = {}): RivalContext {
   return {
-    t: 0, progress: 0, gap: 0, closingRate: 0, playerEffort: 1, ...over,
+    t: 0, progress: 0, gap: 0, closingRate: 0, playerEffort: 1,
+    shelterSaving: 0, battery: 1, playerBattery: 1, ...over,
   };
 }
 
