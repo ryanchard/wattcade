@@ -14,8 +14,9 @@
  * cannot share a look, so the hub does not try to give them one: it gives
  * them a frame and lets each fill it.
  */
-import type { GameModule, GameVariant, RunResult } from '@paperboy/game-api';
-import type { RiderProfile } from '@paperboy/trainer';
+import type {
+  GameModule, GameVariant, RiderProfile, RunResult,
+} from '@paperboy/game-api';
 import { sprintWatts } from '@paperboy/trainer';
 import {
   BOARD_SIZE, boardFor, ordinal, postable,
@@ -24,6 +25,9 @@ import type { ScoreBoards } from './scores.js';
 import { formatDuration, statsFor } from './stats.js';
 import type { ArcadeStats } from './stats.js';
 import { GEAR_MAX } from './gearing.js';
+import {
+  WPRIME_MAX_KJ, WPRIME_MIN_KJ, wPrimeKilojoules,
+} from './profile.js';
 import { cadenceWarning, resistanceWarning } from './trainerStatus.js';
 import type { CadenceState, TrainerView } from './trainerStatus.js';
 
@@ -240,6 +244,11 @@ export function riderPanel(profile: RiderProfile): string {
         ${riderField('mass', 'Weight', 'kg', profile.massKg, 35, 200, 1,
     'Barely matters on the flat, where you are mostly fighting the air. '
     + 'Decides everything the moment the road tilts up.')}
+        ${riderField('wprime', 'Battery', 'kJ', wPrimeKilojoules(profile),
+    WPRIME_MIN_KJ, WPRIME_MAX_KJ, 1,
+    'How much you have above threshold before there is nothing left to '
+    + 'sprint with. Worked out from your FTP and your sprint; change it '
+    + 'only if you have had it measured.')}
       </div>
     </section>`;
 }

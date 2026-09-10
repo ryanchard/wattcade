@@ -9,6 +9,7 @@ import { DEFAULT_RIDER } from '@paperboy/trainer';
 import type { TrainerStatus } from '@paperboy/trainer';
 import type { GameModule } from '@paperboy/game-api';
 import { CATALOG } from '../src/catalog.js';
+import { wPrimeKilojoules } from '../src/profile.js';
 import { GEAR_MAX, NEUTRAL_GEAR } from '../src/gearing.js';
 import { controlsLine, escapeHtml, gearLine, padName, renderHub } from '../src/hub.js';
 import type { HubModel } from '../src/hub.js';
@@ -137,24 +138,30 @@ describe('renderHub', () => {
     expect(html.split('class="place empty"').length - 1).toBe(CATALOG.length * 5);
   });
 
-  it('shows the rider their three numbers', () => {
+  it('shows the rider their four numbers', () => {
     const html = renderHub(model({
       profile: { ...DEFAULT_RIDER, ftpWatts: 265, massKg: 72, sprintWatts: 1240 },
     }));
     expect(html).toContain('value="265"');
     expect(html).toContain('value="72"');
     expect(html).toContain('value="1240"');
+    // The anaerobic store, in kilojoules, seeded from the other two.
+    expect(html).toContain('id="wprime"');
+    expect(html).toContain(`value="${wPrimeKilojoules({
+      ...DEFAULT_RIDER, ftpWatts: 265, massKg: 72, sprintWatts: 1240,
+    })}"`);
   });
 
   it('explains what each number changes, beside the number', () => {
-    // Not one block of small print at the bottom: each of the three boxes
+    // Not one block of small print at the bottom: each of the four boxes
     // carries the line that says what moving it does.
     const html = renderHub(model());
-    expect(html.split('class="does"').length - 1).toBe(3);
+    expect(html.split('class="does"').length - 1).toBe(4);
     expect(html).toContain('hour effort');
     expect(html).toContain('five seconds');
     expect(html).toMatch(/matters on\s+the flat/);
     expect(html).toMatch(/road tilts up/);
+    expect(html).toMatch(/nothing left to\s+sprint with/);
   });
 
   it('locks a ladder rung the rider has not earned', () => {

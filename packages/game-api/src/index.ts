@@ -14,9 +14,30 @@
  *
  * This package is types only. It has no runtime behaviour to get wrong.
  */
-import type { RiderProfile, SimulationParams } from '@paperboy/trainer';
+import type {
+  RiderProfile as TrainerRider, SimulationParams,
+} from '@paperboy/trainer';
 
-export type { RiderProfile, SimulationParams };
+export type { SimulationParams };
+
+/**
+ * The rider as the shell hands them to a game: everything the trainer's
+ * physics needs, plus the numbers the arcade itself keeps.
+ *
+ * `@paperboy/trainer` owns the physical rider — mass, drag, drivetrain — and
+ * nothing in it should have to know that this arcade has a fatigue model. So
+ * W-prime is added here, at the layer that actually plays games, and stays
+ * optional: a profile without one is seeded from FTP and sprint by
+ * `wPrimeCapacity()` in `@paperboy/game-core`.
+ */
+export interface RiderProfile extends TrainerRider {
+  /**
+   * The rider's anaerobic store, in joules — how much they have to spend
+   * above threshold before there is nothing left to sprint with. Absent
+   * means "work it out from my FTP and my sprint".
+   */
+  wPrimeJoules?: number;
+}
 
 /**
  * One row of the status strip the shell draws for every game, so that watts,

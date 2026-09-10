@@ -10,7 +10,8 @@ import { dailySeed, randomSeed, seedFromString } from '@paperboy/game-core';
 import {
   FtmsSource, KeyboardSource, createWebBluetoothConnector,
 } from '@paperboy/trainer';
-import type { RiderProfile, TrainerSource } from '@paperboy/trainer';
+import type { RiderProfile } from '@paperboy/game-api';
+import type { TrainerSource } from '@paperboy/trainer';
 import type { GameModule, GameVariant, RunResult } from '@paperboy/game-api';
 import { BAND_HEIGHT, drawBand, drawPaused } from './band.js';
 import { CATALOG, gameById } from './catalog.js';
@@ -182,12 +183,13 @@ function commitProfile(): void {
     (document.getElementById(id) as HTMLInputElement | null)?.value;
   profile = withEntries(profile, {
     ftp: read('ftp'), mass: read('mass'), sprint: read('sprint'),
+    wprime: read('wprime'),
   });
   saveProfile(store, profile);
 }
 
 function wireHub(): void {
-  for (const id of ['ftp', 'mass', 'sprint']) {
+  for (const id of ['ftp', 'mass', 'sprint', 'wprime']) {
     document.getElementById(id)?.addEventListener('change', commitProfile);
   }
 

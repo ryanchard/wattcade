@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createMemoryStorage } from '@paperboy/game-core';
 import { DEFAULT_RIDER, DEFAULT_SPRINT_MULTIPLE, sprintWatts } from '@paperboy/trainer';
 import {
-  LEGACY_VELODROME_KEY, PROFILE_KEY, loadProfile, saveProfile, withEntries,
+  SPRINT_MULTIPLE_FALLBACK, seededWPrimeJoules, wPrimeCapacity,
+} from '@paperboy/game-core';
+import {
+  LEGACY_VELODROME_KEY, PROFILE_KEY, WPRIME_MAX_KJ, WPRIME_MIN_KJ,
+  loadProfile, saveProfile, withEntries, wPrimeKilojoules,
 } from '../src/profile.js';
 
 describe('loadProfile', () => {
@@ -84,5 +88,68 @@ describe('withEntries', () => {
     const next = withEntries(start, { ftp: '400' });
     expect(next.ftpWatts).toBe(400);
     expect(sprintWatts(next)).toBe(700);
+  });
+});
+
+describe('the anaerobic store on the profile', () => {
+  const OWNER = { ...DEFAULT_RIDER, ftpWatts: 235, sprintWatts: 1184 };
+
+  it('is seeded from FTP and sprint rather than asked for', () => {
+    expect(loadProfile(createMemoryStorage()).wPrimeJoules).toBeUndefined();
+    expect(wPrimeKilojoules(OWNER)).toBe(22);
+  });
+
+  it('grows with the sprint-to-FTP ratio', () => {
+    const diesel = { ...DEFAULT_RIDER, ftpWatts: 235, sprintWatts: 600 };
+    expect(wPrimeKilojoules(OWNER)).toBeGreaterThan(wPrimeKilojoules(diesel));
+  });
+
+  it('keeps tracking FTP and sprint until the rider touches the box', () => {
+    // Every box is committed together, so submitting the store unchanged
+    // must not freeze it.
+    const start = { ...DEFAULT_RIDER, ftpWatts: 200, sprintWatts: 700 };
+    const shown = String(wPrimeKilojoules(start));
+    const next = withEntries(start, { ftp: '300', wprime: shown });
+    expect(next.wPrimeJoules).toBeUndefined();
+    expect(wPrimeCapacity(next)).toBe(seededWPrimeJoules(next));
+    expect(wPrimeCapacity(next)).toBeGreaterThan(wPrimeCapacity(start));
+  });
+
+  it('takes a figure the rider has actually measured', () => {
+    const next = withEntries(OWNER, { wprime: '26' });
+    expect(next.wPrimeJoules).toBe(26000);
+    expect(wPrimeCapacity(next)).toBe(26000);
+  });
+
+  it('clamps a typed store to something a body could hold', () => {
+    expect(withEntries(OWNER, { wprime: '900' }).wPrimeJoules)
+      .toBe(WPRIME_MAX_KJ * 1000);
+    expect(withEntries(OWNER, { wprime: '1' }).wPrimeJoules)
+      .toBe(WPRIME_MIN_KJ * 1000);
+  });
+
+  it('round-trips a measured store and never persists a derived one', () => {
+    const store = createMemoryStorage();
+    saveProfile(store, OWNER);
+    expect(store.getItem(PROFILE_KEY)).not.toContain('wPrimeJoules');
+    expect(loadProfile(store).wPrimeJoules).toBeUndefined();
+
+    saveProfile(store, { ...OWNER, wPrimeJoules: 26000 });
+    expect(loadProfile(store).wPrimeJoules).toBe(26000);
+  });
+
+  it('clamps a stored store that is out of any human range', () => {
+    const store = createMemoryStorage();
+    store.setItem(PROFILE_KEY, JSON.stringify({ wPrimeJoules: 9e9 }));
+    expect(loadProfile(store).wPrimeJoules).toBe(WPRIME_MAX_KJ * 1000);
+    store.setItem(PROFILE_KEY, JSON.stringify({ wPrimeJoules: 'nope' }));
+    expect(loadProfile(store).wPrimeJoules).toBeUndefined();
+  });
+
+  it('estimates a sprint the same way the trainer physics does', () => {
+    // game-core restates the multiple rather than importing it, so that the
+    // fatigue model stays dependency-free. This is the assertion that keeps
+    // the two copies from drifting.
+    expect(SPRINT_MULTIPLE_FALLBACK).toBe(DEFAULT_SPRINT_MULTIPLE);
   });
 });
