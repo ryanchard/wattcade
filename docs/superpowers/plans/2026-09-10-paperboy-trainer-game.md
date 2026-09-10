@@ -4989,8 +4989,16 @@ export const HOUSE_MATCH_RADIUS_M = 6;
 export const STREET_LATERAL = 3.7;
 export const WINDOW_LATERAL = 1.4;
 export const PORCH_LATERAL = 2.6;
-export const PORCH_TOLERANCE_M = 0.8;
-export const MAILBOX_TOLERANCE_M = 0.5;
+/**
+ * Hit tolerances, chosen so that MISSING is genuinely reachable. Across every
+ * house the generator produces (porch 1.6-2.2, mailbox 2.9-3.3) these give
+ * roughly 35-45% lawn, 26% mailbox and 29-39% porch. Widen them and the lawn
+ * outcome collapses — at 0.8/0.5 a paper landing anywhere from 1.40 to 3.60
+ * scores, leaving 'lawn' reachable in under 4% of the band, which trivialises
+ * throwing and means the combo multiplier almost never breaks.
+ */
+export const PORCH_TOLERANCE_M = 0.45;
+export const MAILBOX_TOLERANCE_M = 0.3;
 export function classifyLanding(
   landing: Landing, houses: readonly HouseSpec[],
 ): LandingOutcome;
@@ -5511,15 +5519,25 @@ describe('band boundaries', () => {
 
 describe('mailbox and porch tolerances', () => {
   it('accepts a mailbox hit at the edge of tolerance', () => {
-    expect(at(spec.mailboxLateral + 0.5).band).toBe('mailbox');
+    expect(at(spec.mailboxLateral + 0.3).band).toBe('mailbox');
   });
 
   it('rejects a mailbox hit just outside tolerance', () => {
-    expect(at(spec.mailboxLateral - 0.51).band).toBe('lawn');
+    expect(at(spec.mailboxLateral - 0.31).band).toBe('lawn');
   });
 
   it('accepts a porch hit at the edge of tolerance', () => {
-    expect(at(spec.porchLateral + 0.8).band).toBe('porch');
+    // 0.44 rather than the exact 0.45: |2.35 - 1.9| evaluates to
+    // 0.45000000000000018 in floating point and would fail the <=,
+    // making this a test about IEEE754 rather than about tolerance.
+    expect(at(spec.porchLateral + 0.44).band).toBe('porch');
+  });
+
+  it('leaves a reachable miss in both scoring bands', () => {
+    // The point of the tolerances: throwing must be able to fail. If someone
+    // widens them, the lawn outcome collapses and the combo never breaks.
+    expect(at(2.79).band).toBe('lawn'); // inside the mailbox band, off target
+    expect(at(1.42).band).toBe('lawn'); // inside the porch band, off target
   });
 });
 
