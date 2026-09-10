@@ -118,6 +118,12 @@ export interface RunResult {
   readonly score: number | null;
   /** True when the rider hit the safety stop rather than finishing. */
   readonly stopped: boolean;
+  /**
+   * A `GameVariant` the shell should offer as the obvious next ride — the
+   * rung of a ladder that this run just unlocked. Omitted when there is no
+   * such thing, which is most of the time.
+   */
+  readonly nextVariantId?: string;
 }
 
 export interface GameSession {

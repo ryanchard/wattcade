@@ -84,7 +84,6 @@ function label(
 
 export function drawHud(
   c: CanvasRenderingContext2D, s: RaceState, w: number, h: number,
-  trainerLabel: string,
 ): void {
   const unit = Math.max(10, Math.min(w, h * 1.6) / 100);
   c.save();
@@ -152,7 +151,7 @@ export function drawHud(
   c.fillStyle = INK.text;
   c.font = `700 ${unit * 2.4}px ${DISPLAY_FONT}`;
   c.fillText(s.spec.name.toUpperCase(), w - unit * 2, h - unit * 4.2);
-  label(c, trainerLabel, w - unit * 2, h - unit * 2.6, 'right');
+  label(c, 'the rival', w - unit * 2, h - unit * 2.6, 'right');
   c.textAlign = 'left';
 
   // A stripe of the rival's colour, so the dot on the map and the rider on
